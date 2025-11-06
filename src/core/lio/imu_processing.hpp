@@ -11,6 +11,7 @@
 #include "common/eigen_types.h"
 #include "common/measure_group.h"
 #include "common/point_def.h"
+#include "core/lightning_math.hpp"
 #include "core/lio/eskf.hpp"
 #include "core/lio/pose6d.h"
 #include "utils/timer.h"
@@ -146,7 +147,7 @@ inline void ImuProcess::IMUInit(const MeasureGroup &meas, ESKF &kf_state, int &N
 
     auto init_state = kf_state.GetX();
     init_state.timestamp_ = meas.imu_.back()->timestamp;
-    init_state.grav_ = S2(-mean_acc_ / mean_acc_.norm() * G_m_s2);
+    init_state.grav_ = -mean_acc_ / mean_acc_.norm() * G_m_s2;
     init_state.bg_ = mean_gyr_;
     init_state.offset_t_lidar_ = t_lidar_mu_;
     init_state.offset_R_lidar_ = R_lidar_imu_;

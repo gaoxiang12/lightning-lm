@@ -3,29 +3,29 @@
 //
 
 #include "core/lio/eskf.hpp"
+#include "core/lightning_math.hpp"
 
 namespace lightning {
 
 void ESKF::Predict(const double& dt, const ESKF::ProcessNoiseType& Q, const Vec3d& gyro, const Vec3d& acce) {
     Eigen::Matrix<double, 24, 1> f_ = x_.get_f(gyro, acce);  // 调用get_f 获取 速度 角速度 加速度
-    Eigen::Matrix<double, 24, 23> f_x_ = x_.df_dx(acce);
+    Eigen::Matrix<double, 24, 24> f_x_ = x_.df_dx(acce);
 
     Eigen::Matrix<double, 24, 12> f_w_ = x_.df_dw();
-    Eigen::Matrix<double, 23, process_noise_dim_> f_w_final;
+    Eigen::Matrix<double, 24, process_noise_dim_> f_w_final;
 
-    NavState x_before = x_;
     x_.oplus(f_, dt);
 
     F_x1_ = CovType::Identity();
 
     // set f_x_final
-    CovType f_x_final;  // 23x23
+    CovType f_x_final;  // 24x24
     for (auto st : x_.vect_states_) {
         int idx = st.idx_;
         int dim = st.dim_;
         int dof = st.dof_;
 
-        for (int i = 0; i < 23; i++) {
+        for (int i = 0; i < 24; i++) {
             for (int j = 0; j < dof; j++) {
                 f_x_final(idx + j, i) = f_x_(dim + j, i);
             }
@@ -59,34 +59,6 @@ void ESKF::Predict(const double& dt, const ESKF::ProcessNoiseType& Q, const Vec3
         }
     }
 
-    Eigen::Matrix<double, 2, 3> res_temp_S2;
-    Vec3d seg_S2;
-    for (auto st : x_.S2_states_) {
-        int idx = st.idx_;
-        int dim = st.dim_;
-        for (int i = 0; i < 3; i++) {
-            seg_S2(i) = f_(dim + i) * dt;
-        }
-
-        SO3 res = math::exp(seg_S2, 0.5f);
-
-        Vec2d vec = Vec2d::Zero();
-        Eigen::Matrix<double, 2, 3> Nx = x_.grav_.S2_Nx_yy();
-        Eigen::Matrix<double, 3, 2> Mx = x_before.grav_.S2_Mx(vec);
-
-        F_x1_.block<2, 2>(idx, idx) = Nx * res.matrix() * Mx;
-
-        Eigen::Matrix<double, 3, 3> x_before_hat = x_before.grav_.S2_hat();
-        res_temp_S2 = -Nx * res.matrix() * x_before_hat * math::A_matrix(seg_S2).transpose();
-
-        for (int i = 0; i < state_dim_; i++) {
-            f_x_final.block<2, 1>(idx, i) = res_temp_S2 * (f_x_.block<3, 1>(dim, i));
-        }
-        for (int i = 0; i < process_noise_dim_; i++) {
-            f_w_final.block<2, 1>(idx, i) = res_temp_S2 * (f_w_.block<3, 1>(dim, i));
-        }
-    }
-
     F_x1_ += f_x_final * dt;
     P_ = (F_x1_)*P_ * (F_x1_).transpose() + (dt * f_w_final) * Q * (dt * f_w_final).transpose();
 }
@@ -105,8 +77,8 @@ void ESKF::Update(ESKF::ObsType obs, const double& R) {
 
     CovType P_propagated = P_;
 
-    Eigen::Matrix<double, 23, 1> K_r;
-    Eigen::Matrix<double, 23, 23> K_H;
+    Eigen::Matrix<double, 24, 1> K_r;
+    Eigen::Matrix<double, 24, 24> K_H;
 
     StateVecType dx_current = StateVecType::Zero();  // 本轮迭代的dx
 
@@ -184,26 +156,6 @@ void ESKF::Update(ESKF::ObsType obs, const double& R) {
             }
         }
 
-        for (auto it : x_.S2_states_) {
-            int idx = it.idx_;
-
-            Vec2d seg_S2 = dx.block<2, 1>(idx, 0);
-
-            Eigen::Matrix<double, 2, 3> Nx = x_.grav_.S2_Nx_yy();
-            Eigen::Matrix<double, 3, 2> Mx = start_x.grav_.S2_Mx(seg_S2);
-            Mat2d res_temp_S2 = Nx * Mx;
-
-            dx_current.block<2, 1>(idx, 0) = res_temp_S2 * dx.block<2, 1>(idx, 0);
-
-            for (int j = 0; j < state_dim_; j++) {
-                P_.block<2, 1>(idx, j) = res_temp_S2 * (P_.block<2, 1>(idx, j));
-            }
-
-            for (int j = 0; j < state_dim_; j++) {
-                P_.block<1, 2>(j, idx) = (P_.block<1, 2>(j, idx)) * res_temp_S2.transpose();
-            }
-        }
-
         /// 处理各类观测模型
         if (state_dim_ > dof_measurement) {
             Eigen::MatrixXd h_x_cur = Eigen::MatrixXd::Zero(dof_measurement, state_dim_);
@@ -227,19 +179,19 @@ void ESKF::Update(ESKF::ObsType obs, const double& R) {
 
             // Q*H^T * R^-1 * r = K * r
             // <-- K ----->
-            K_r = Q_inv.template block<23, 12>(0, 0) * custom_obs_model_.h_x_.transpose() * custom_obs_model_.residual_;
+            K_r = Q_inv.template block<24, 12>(0, 0) * custom_obs_model_.h_x_.transpose() * custom_obs_model_.residual_;
 
             // K_H = Q^-1 H^T R^-1 H
             //       <--  K     ->
             K_H.setZero();
-            K_H.template block<23, 12>(0, 0) = Q_inv.template block<23, 12>(0, 0) * HTH;
+            K_H.template block<24, 12>(0, 0) = Q_inv.template block<24, 12>(0, 0) * HTH;
         }
 
         // dx = Kr + (KH-I) dx
-        dx_current = K_r + (K_H - Eigen::Matrix<double, 23, 23>::Identity()) * dx_current;
+        dx_current = K_r + (K_H - Eigen::Matrix<double, 24, 24>::Identity()) * dx_current;
 
         // check nan
-        for (int j = 0; j < 23; ++j) {
+        for (int j = 0; j < 24; ++j) {
             if (std::isnan(dx_current(j, 0))) {
                 return;
             }
@@ -267,7 +219,7 @@ void ESKF::Update(ESKF::ObsType obs, const double& R) {
         last_lidar_res = custom_obs_model_.lidar_residual_mean_;
         custom_obs_model_.converge_ = true;
 
-        for (int j = 0; j < 23; j++) {
+        for (int j = 0; j < 24; j++) {
             if (std::fabs(dx_current[j]) > limit_[j]) {
                 custom_obs_model_.converge_ = false;
                 break;
@@ -295,7 +247,7 @@ void ESKF::Update(ESKF::ObsType obs, const double& R) {
                 }
 
                 res_temp_SO3 = math::A_matrix(seg_SO3).transpose();
-                for (int j = 0; j < 23; j++) {
+                for (int j = 0; j < 24; j++) {
                     L_.block<3, 1>(idx, j) = res_temp_SO3 * (P_.block<3, 1>(idx, j));
                 }
 
@@ -303,40 +255,13 @@ void ESKF::Update(ESKF::ObsType obs, const double& R) {
                     K_H.block<3, 1>(idx, j) = res_temp_SO3 * (K_H.block<3, 1>(idx, j));
                 }
 
-                for (int j = 0; j < 23; j++) {
+                for (int j = 0; j < 24; j++) {
                     L_.block<1, 3>(j, idx) = (L_.block<1, 3>(j, idx)) * res_temp_SO3.transpose();
                     P_.block<1, 3>(j, idx) = (P_.block<1, 3>(j, idx)) * res_temp_SO3.transpose();
                 }
             }
 
-            Mat2d res_temp_S2;
-            Vec2d seg_S2;
-            for (auto it : x_.S2_states_) {
-                int idx = it.idx_;
-
-                for (int j = 0; j < 2; j++) {
-                    seg_S2(j) = dx_current(j + idx);
-                }
-
-                Eigen::Matrix<double, 2, 3> Nx = x_.grav_.S2_Nx_yy();
-                Eigen::Matrix<double, 3, 2> Mx = start_x.grav_.S2_Mx(seg_S2);
-                res_temp_S2 = Nx * Mx;
-
-                for (auto j = 0; j < 23; j++) {
-                    L_.block<2, 1>(idx, j) = res_temp_S2 * (P_.block<2, 1>(idx, j));
-                }
-
-                for (auto j = 0; j < 15; j++) {
-                    K_H.block<2, 1>(idx, j) = res_temp_S2 * (K_H.block<2, 1>(idx, j));
-                }
-
-                for (int j = 0; j < 23; j++) {
-                    L_.block<1, 2>(j, idx) = (L_.block<1, 2>(j, idx)) * res_temp_S2.transpose();
-                    P_.block<1, 2>(j, idx) = (P_.block<1, 2>(j, idx)) * res_temp_S2.transpose();
-                }
-            }
-
-            P_ = L_ - K_H.block<23, 15>(0, 0) * P_.template block<15, 23>(0, 0);
+            P_ = L_ - K_H.block<24, 15>(0, 0) * P_.template block<15, 24>(0, 0);
 
             break;
         }

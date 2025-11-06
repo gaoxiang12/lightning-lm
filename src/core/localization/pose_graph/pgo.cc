@@ -1,5 +1,6 @@
 #include "pgo.h"
 #include "pgo_impl.h"
+#include "core/lightning_math.hpp"
 
 #include <boost/format.hpp>
 

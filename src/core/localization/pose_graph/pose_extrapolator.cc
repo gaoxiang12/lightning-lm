@@ -1,5 +1,5 @@
 #include "core/localization/pose_graph/pose_extrapolator.h"
-
+#include "core/lightning_math.hpp"
 #include <memory>
 
 namespace lightning::loc {
