@@ -211,7 +211,7 @@ void SlamSystem::SaveMap(const std::string& path) {
             emitter << YAML::Key << "mode" << YAML::Value << "trinary";
             emitter << YAML::Key << "width" << YAML::Value << map.info.width;
             emitter << YAML::Key << "height" << YAML::Value << map.info.height;
-            emitter << YAML::Key << "resolution" << YAML::Value << float(0.05);
+            emitter << YAML::Key << "resolution" << YAML::Value << static_cast<float>(map.info.resolution);
             std::vector<double> orig{map.info.origin.position.x, map.info.origin.position.y, 0};
             emitter << YAML::Key << "origin" << YAML::Value << orig;
             emitter << YAML::Key << "negate" << YAML::Value << 0;
