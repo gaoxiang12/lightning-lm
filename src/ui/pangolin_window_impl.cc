@@ -170,9 +170,9 @@ bool PangolinWindowImpl::UpdateState() {
     std::lock_guard<std::mutex> lock(mtx_nav_state_);
     Vec3d pos = pose_.translation().eval();
     Vec3d vel_baselink = pose_.so3().inverse() * vel_;
-    double roll = pose_.angleX();
-    double pitch = pose_.angleY();
-    double yaw = pose_.angleZ();
+    // double roll = pose_.angleX();
+    // double pitch = pose_.angleY();
+    // double yaw = pose_.angleZ();
 
     // 滤波器状态作曲线图
     log_vel_.Log(vel_(0), vel_(1), vel_(2));
@@ -223,7 +223,6 @@ void PangolinWindowImpl::DrawAll() {
         UL lock(mtx_current_scan_);
 
         if (all_keyframes_.size() > 1) {
-
             /// 闭环后的轨迹
             glLineWidth(5.0);
             glBegin(GL_LINE_STRIP);

@@ -556,11 +556,11 @@ void PGOImpl::CollectOptimizationStatistics() {
         lo_error_hori = ss.str();
     }
 
-    const double loc_err = std::sqrt(result_.lidar_loc_error_vert_ * result_.lidar_loc_error_vert_ +
-                                     result_.lidar_loc_error_hori_ * result_.lidar_loc_error_hori_);
+    // const double loc_err = std::sqrt(result_.lidar_loc_error_vert_ * result_.lidar_loc_error_vert_ +
+    //                                  result_.lidar_loc_error_hori_ * result_.lidar_loc_error_hori_);
 
-    const double lo_err = std::sqrt(result_.lidar_odom_error_vert_ * result_.lidar_odom_error_vert_ +
-                                    result_.lidar_odom_error_hori_ * result_.lidar_odom_error_hori_);
+    // const double lo_err = std::sqrt(result_.lidar_odom_error_vert_ * result_.lidar_odom_error_vert_ +
+    //                                 result_.lidar_odom_error_hori_ * result_.lidar_odom_error_hori_);
 }
 
 void PGOImpl::UpdateFinalResultByLastFrame() {
@@ -638,10 +638,10 @@ void PGOImpl::UpdateFinalResultByWindow() {
     // LOG(INFO) << "PGO assigned result with position [" << result_.pose_.translation().transpose() << "].";
 
     /// 确定各个source的定位状态
-    bool following_gps = false;
-    bool following_lidar_loc = false;
-    bool following_lidar_odom = lf->lidar_odom_valid_;
-    bool following_dr = lf->dr_valid_;
+    // bool following_gps = false;
+    // bool following_lidar_loc = false;
+    // bool following_lidar_odom = lf->lidar_odom_valid_;
+    // bool following_dr = lf->dr_valid_;
     // if (lf->lidar_odom_rot_degenerated && lf->lidar_odom_trans_degenerated) {
     //     following_lidar_odom = false;
     // }

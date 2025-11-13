@@ -35,8 +35,7 @@ namespace lightning {
  */
 class RosbagIO {
    public:
-    explicit RosbagIO(std::string bag_file, DatasetType dataset_type = DatasetType::NCLT)
-        : bag_file_(std::move(bag_file)) {
+    explicit RosbagIO(std::string bag_file) : bag_file_(std::move(bag_file)) {
         /// handle ctrl-c
         signal(SIGINT, lightning::debug::SigHandle);
     }
@@ -128,7 +127,6 @@ class RosbagIO {
     rclcpp::Serialization<livox_ros_driver2::msg::CustomMsg> seri_livox_;
 
     std::string bag_file_;
-    DatasetType dataset_type_ = DatasetType::NCLT;
 };
 }  // namespace lightning
 

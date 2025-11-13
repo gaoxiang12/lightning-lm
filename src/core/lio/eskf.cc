@@ -117,9 +117,9 @@ void ESKF::Update(ESKF::ObsType obs, const double& R) {
     double last_lidar_res = 0;
 
     double init_res = 0.0;
-    static double iterated_num = 0;
-    static double update_num = 0;
-    update_num += 1;
+    // static double iterated_num = 0;
+    // static double update_num = 0;
+    // update_num += 1;
     for (int i = -1; i < maximum_iter_; i++) {
         custom_obs_model_.valid_ = true;
 
@@ -142,7 +142,7 @@ void ESKF::Update(ESKF::ObsType obs, const double& R) {
             x_ = last_x;
             break;
         }
-        iterated_num += 1;
+        // iterated_num += 1;
 
         if (!custom_obs_model_.valid_) {
             continue;
@@ -216,7 +216,7 @@ void ESKF::Update(ESKF::ObsType obs, const double& R) {
             K_H = K * h_x_cur;
         } else {
             /// 纯雷达观测
-            double R_inv = 1.0 / (R * dof_measurement);
+            // double R_inv = 1.0 / (R * dof_measurement);
 
             // HTRH = H^T R^-1 H
             Eigen::Matrix<double, 12, 12> HTH = custom_obs_model_.h_x_.transpose() * custom_obs_model_.h_x_;

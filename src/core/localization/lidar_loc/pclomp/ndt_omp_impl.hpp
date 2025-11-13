@@ -300,7 +300,7 @@ double pclomp::NormalDistributionsTransform<PointSource, PointTarget>::computeDe
     x_trans_pt = trans_cloud.points[idx];
 
     auto &neighborhood = neighborhoods[thread_n];
-    auto &distances    = distancess[thread_n];
+    // auto &distances    = distancess[thread_n];
 
     // Find nieghbors (Radius search has been experimentally faster than direct neighbor checking.
     switch (search_method) {
