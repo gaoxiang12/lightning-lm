@@ -1,1 +1,0 @@
-pull request create failed: GraphQL: Head sha can't be blank, Base sha can't be blank, No commits between main and security-fixes-lightning-lm, Head ref must be a branch, Base ref must be a branch (createPullRequest)
