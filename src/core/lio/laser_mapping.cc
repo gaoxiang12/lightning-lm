@@ -12,6 +12,7 @@ namespace lightning {
 
 bool LaserMapping::Init(const std::string &config_yaml) {
     LOG(INFO) << "init laser mapping from " << config_yaml;
+    LOG(INFO) << "build version, 2026-0316-1802 ... ";    
     if (!LoadParamsFromYAML(config_yaml)) {
         return false;
     }

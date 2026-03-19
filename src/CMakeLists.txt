@@ -56,6 +56,7 @@ ament_target_dependencies(
         "pcl_conversions"
         "tf2_ros"
         "tf2"
+        "tf2_geometry_msgs"
 )
 
 add_dependencies(${PROJECT_NAME}.libs

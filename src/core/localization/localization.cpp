@@ -93,7 +93,7 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
         loc_result_ = res;
 
         if (tf_callback_ && loc_result_.valid_) {
-            tf_callback_(loc_result_.ToGeoMsg());
+            tf_callback_(loc_result_);
         }
 
         if (ui_) {

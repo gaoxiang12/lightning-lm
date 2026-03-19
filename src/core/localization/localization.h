@@ -75,7 +75,7 @@ class Localization {
     void LidarOdomProcCloud(CloudPtr);
     void LidarLocProcCloud(CloudPtr);
 
-    using TFCallback = std::function<void(const geometry_msgs::msg::TransformStamped& odom)>;
+    using TFCallback = std::function<void(const LocalizationResult& res)>;
     using LocStateCallback = std::function<void(const std_msgs::msg::Int32& state)>;
     using PointcloudBodyCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
     using PointcloudWorldCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;

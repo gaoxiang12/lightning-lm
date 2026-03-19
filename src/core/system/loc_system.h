@@ -6,7 +6,10 @@
 #define LIGHTNING_LOC_SYSTEM_H
 
 #include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
 #include <rclcpp/rclcpp.hpp>
+#include <geometry_msgs/msg/transform_stamped.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 
@@ -15,6 +18,8 @@
 #include "common/eigen_types.h"
 #include "common/imu.h"
 #include "common/keyframe.h"
+
+#include "core/localization/localization_result.h"
 
 namespace lightning {
 
@@ -47,6 +52,9 @@ class LocSystem {
     /// 实时模式下的spin
     void Spin();
 
+    /// 发布base_link的TF
+    void PublishBaseLinkTF(const lightning::loc::LocalizationResult& res);
+
    private:
     Options options_;
 
@@ -58,6 +66,8 @@ class LocSystem {
     /// 实时模式下的ros2 node, subscribers
     rclcpp::Node::SharedPtr node_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_ = nullptr;
+    std::shared_ptr<tf2_ros::Buffer> tf_buffer_ = nullptr;
+    std::shared_ptr<tf2_ros::TransformListener> tf_listener_ = nullptr;
 
     std::string imu_topic_;
     std::string cloud_topic_;
