@@ -12,7 +12,11 @@ namespace lightning {
 
 bool LaserMapping::Init(const std::string &config_yaml) {
     LOG(INFO) << "init laser mapping from " << config_yaml;
+<<<<<<< HEAD
     LOG(INFO) << "build version, 2026-0316-1802 ... ";    
+=======
+    LOG(INFO) << "build version, 2026-0326-1201 ... ";    
+>>>>>>> da5349f (0327：适配cx16 雷达)
     if (!LoadParamsFromYAML(config_yaml)) {
         return false;
     }
