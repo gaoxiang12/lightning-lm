@@ -29,11 +29,36 @@ fasterlio:
   b_acc_cov: 0.0001
   b_gyr_cov: 0.0001
   extrinsic_est_en: false      # true: enable the online estimation of IMU-LiDAR extrinsic
-  extrinsic_T: [ 0.0, 0.0, 0.001 ]
+  extrinsic_T: [ 0.0, 0.0, 0.2 ]
   extrinsic_R: [ 1, 0, 0,
                  0, 1, 0,
                  0, 0, 1 ]
   keep_first_imu_estimation: false
+  #新增
+  submap_kf_window: 20
+  submap_radius: 25.0
+
+  use_pole_landmark: true
+  pole_radius: 0.0375
+  pole_radius_tol: 0.02
+  pole_length_min: 0.2
+  pole_length_max: 1.0
+  pole_max_tilt_deg: 8.0
+  pole_match_dist_th: 1.5
+  pole_match_angle_deg: 10.0
+
+  pole_cluster_tol: 0.10
+  pole_cluster_min_size: 8
+  pole_cluster_max_size: 200
+
+  pole_fit_max_iters: 5
+  pole_fit_stop_th: 1e-4
+
+  intensity_bin_size: 5.0
+  intensity_max_bins: 40
+  intensity_quantile: 0.99
+  intensity_min_bin_points: 50
+  intensity_bin_smooth: true
 
 
 g2p5:
