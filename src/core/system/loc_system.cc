@@ -114,8 +114,8 @@ void LocSystem::PublishBaseLinkTF(const lightning::loc::LocalizationResult& res)
     geometry_msgs::msg::TransformStamped tf_imu_base;
 
     try {
-        // lookupTransform(target_frame, source_frame, time) - ·µ»Ø source_frame µ½ target_frame µÄ±ä»»
-        // ÎÒÃÇĞèÒª imu_link µ½ base_link µÄ±ä»»£¬ËùÒÔ target_frame ÊÇ base_link£¬source_frame ÊÇ imu_link
+        // lookupTransform(target_frame, source_frame, time) - è¿”å› source_frame åˆ° target_frame çš„å˜æ¢
+        // æˆ‘ä»¬éœ€è¦ imu_link åˆ° base_link çš„å˜æ¢ï¼Œæ‰€ä»¥ target_frame æ˜¯ base_linkï¼Œsource_frame æ˜¯ imu_link
         tf_imu_base = tf_buffer_->lookupTransform(
             "base_link",
             "imu_link",
@@ -128,7 +128,7 @@ void LocSystem::PublishBaseLinkTF(const lightning::loc::LocalizationResult& res)
 
     tf2::Transform T_map_imu, T_imu_base, T_map_base;
 
-    // res.pose_ ÊÓÎª map->imu_link
+    // res.pose_ è§†ä¸º map->imu_link
     T_map_imu.setOrigin(tf2::Vector3(
         res.pose_.translation().x(),
         res.pose_.translation().y(),
@@ -140,7 +140,7 @@ void LocSystem::PublishBaseLinkTF(const lightning::loc::LocalizationResult& res)
     tf2::fromMsg(tf_imu_base.transform, T_imu_base);
 
     // T_map_base = T_map_imu * T_imu_base
-    // ÒòÎª T_imu_base ÊÇ imu_link µ½ base_link µÄ±ä»»
+    // å› ä¸º T_imu_base æ˜¯ imu_link åˆ° base_link çš„å˜æ¢
     T_map_base = T_map_imu * T_imu_base;
 
     geometry_msgs::msg::TransformStamped msg;

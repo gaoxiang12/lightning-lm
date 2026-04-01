@@ -10,8 +10,6 @@
 #include "common/point_def.h"
 #include "common/std_types.h"
 
-#include "common/pole_landmark.h"
-
 namespace lightning {
 
 /// 关键帧描述
@@ -63,16 +61,6 @@ class Keyframe {
         return state_;
     }
 
-    void SetPoles(const std::vector<PoleLandmark>& poles) {
-        UL lock(data_mutex_);
-        poles_ = poles;
-    }
-
-    std::vector<PoleLandmark> GetPoles() {
-        UL lock(data_mutex_);
-        return poles_;
-    }
-
    protected:
     unsigned long id_ = 0;
 
@@ -84,7 +72,6 @@ class Keyframe {
     SE3 pose_opt_;  // 后端优化后的pose
 
     NavState state_;  // 卡尔曼滤波器状态
-    std::vector<PoleLandmark> poles_;  // 关键帧提取到的反光柱landmark
 };
 
 }  // namespace lightning

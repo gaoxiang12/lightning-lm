@@ -123,6 +123,15 @@ void PointCloudPreprocess::VelodyneHandler(const sensor_msgs::msg::PointCloud2::
     pcl::fromROSMsg(*msg, pl_orig);
     int plsize = pl_orig.points.size();
     cloud_out_.reserve(plsize);
+    // 调试0327
+if (plsize > 0) {
+    LOG(INFO) << "raw point time first: " << pl_orig.points.front().time
+              << ", mid: " << pl_orig.points[plsize / 2].time
+              << ", last: " << pl_orig.points.back().time;
+
+    LOG(INFO) << "time_scale_: " << time_scale_;
+}
+     
 
     /*** These variables only works when no point timestamps given ***/
     double omega_l = 3.61;  // scan angular velocity
@@ -155,7 +164,12 @@ void PointCloudPreprocess::VelodyneHandler(const sensor_msgs::msg::PointCloud2::
         added_pt.z = pl_orig.points[i].z;
         added_pt.intensity = pl_orig.points[i].intensity;
         added_pt.time = pl_orig.points[i].time * time_scale_;  // curvature unit: ms
-
+	// 调试打印0327
+	if (i == plsize - 1) {
+	    LOG(INFO) << "last point raw time: " << pl_orig.points[i].time
+		      << ", scaled time(ms expected): " << added_pt.time;
+	}
+	
         if (!given_offset_time_) {
             int layer = pl_orig.points[i].ring;
             double yaw_angle = atan2(added_pt.y, added_pt.x) * 57.2957;

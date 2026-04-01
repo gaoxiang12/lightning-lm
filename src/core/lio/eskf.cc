@@ -220,28 +220,6 @@ void ESKF::Update(ESKF::ObsType obs, const double& R) {
 
             // HTRH = H^T R^-1 H
             Eigen::Matrix<double, 12, 12> HTH = custom_obs_model_.h_x_.transpose() * custom_obs_model_.h_x_;
-            /// 退化检测：仅保留可观测方向
-            Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, 12, 12>> es(HTH);
-            if (es.info() == Eigen::Success) {
-                auto evals = es.eigenvalues();
-                auto evecs = es.eigenvectors();
-
-                double lambda_max = std::max(1e-9, evals.maxCoeff());
-                Eigen::Matrix<double, 12, 12> Pobs = Eigen::Matrix<double, 12, 12>::Zero();
-
-                for (int k = 0; k < 12; ++k) {
-                    if (evals(k) > lambda_max * 1e-3) {
-                        auto v = evecs.col(k);
-                        Pobs += v * v.transpose();
-                    }
-                }
-
-                /// 将 H 投影到可观测子空间
-                custom_obs_model_.h_x_ = custom_obs_model_.h_x_ * Pobs;
-
-                /// 重新计算 HTH
-                HTH = custom_obs_model_.h_x_.transpose() * custom_obs_model_.h_x_;
-            }
 
             CovType P_temp = (P_ / R).inverse();  // P阵上面已经更新
             P_temp.block<12, 12>(0, 0) += HTH;    // Q in (38)

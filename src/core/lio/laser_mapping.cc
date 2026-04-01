@@ -1,8 +1,6 @@
 #include <pcl/common/transforms.h>
 #include <yaml-cpp/yaml.h>
 #include <fstream>
-#include <pcl/search/kdtree.h>
-#include <pcl/segmentation/extract_clusters.h>
 
 #include "common/options.h"
 #include "core/lightning_math.hpp"
@@ -14,8 +12,7 @@ namespace lightning {
 
 bool LaserMapping::Init(const std::string &config_yaml) {
     LOG(INFO) << "init laser mapping from " << config_yaml;
-
-    LOG(INFO) << "build version, 2026-0326-1201 ... ";    
+    LOG(INFO) << "build version, 2026-0401-1103 ... ";    
     if (!LoadParamsFromYAML(config_yaml)) {
         return false;
     }
@@ -68,30 +65,6 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
         use_aa_ = yaml["fasterlio"]["use_aa"].as<bool>();
 
         skip_lidar_num_ = yaml["fasterlio"]["skip_lidar_num"].as<int>();
-
-        options_.submap_kf_window_ = yaml["fasterlio"]["submap_kf_window"].as<int>();
-        options_.submap_radius_ = yaml["fasterlio"]["submap_radius"].as<double>();
-
-        options_.use_pole_landmark_ = yaml["fasterlio"]["use_pole_landmark"].as<bool>();
-        options_.pole_radius_ = yaml["fasterlio"]["pole_radius"].as<double>();
-        options_.pole_radius_tol_ = yaml["fasterlio"]["pole_radius_tol"].as<double>();
-        options_.pole_length_min_ = yaml["fasterlio"]["pole_length_min"].as<double>();
-        options_.pole_length_max_ = yaml["fasterlio"]["pole_length_max"].as<double>();
-        options_.pole_max_tilt_deg_ = yaml["fasterlio"]["pole_max_tilt_deg"].as<double>();
-        options_.pole_match_dist_th_ = yaml["fasterlio"]["pole_match_dist_th"].as<double>();
-        options_.pole_match_angle_deg_ = yaml["fasterlio"]["pole_match_angle_deg"].as<double>();
-        options_.intensity_bin_size_ = yaml["fasterlio"]["intensity_bin_size"].as<float>();
-        options_.intensity_max_bins_ = yaml["fasterlio"]["intensity_max_bins"].as<int>();
-        options_.intensity_quantile_ = yaml["fasterlio"]["intensity_quantile"].as<float>();
-        options_.intensity_min_bin_points_ = yaml["fasterlio"]["intensity_min_bin_points"].as<int>();
-        options_.intensity_bin_smooth_ = yaml["fasterlio"]["intensity_bin_smooth"].as<bool>();
-
-        options_.pole_cluster_tol_ = yaml["fasterlio"]["pole_cluster_tol"].as<double>();
-        options_.pole_cluster_min_size_ = yaml["fasterlio"]["pole_cluster_min_size"].as<int>();
-        options_.pole_cluster_max_size_ = yaml["fasterlio"]["pole_cluster_max_size"].as<int>();
-
-        options_.pole_fit_max_iters_ = yaml["fasterlio"]["pole_fit_max_iters"].as<int>();
-        options_.pole_fit_stop_th_ = yaml["fasterlio"]["pole_fit_stop_th"].as<double>();
         enable_skip_lidar_ = skip_lidar_num_ > 0;
 
     } catch (...) {
@@ -138,20 +111,6 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
     p_imu_->SetGyrBiasCov(Vec3d(b_gyr_cov, b_gyr_cov, b_gyr_cov));
     p_imu_->SetAccBiasCov(Vec3d(b_acc_cov, b_acc_cov, b_acc_cov));
 
-    submap_kf_window_ = options_.submap_kf_window_;
-    submap_radius_ = options_.submap_radius_;
-    intensity_bin_size_ = options_.intensity_bin_size_;
-    intensity_max_bins_ = options_.intensity_max_bins_;
-    intensity_quantile_ = options_.intensity_quantile_;
-    intensity_min_bin_points_ = options_.intensity_min_bin_points_;
-    intensity_bin_smooth_ = options_.intensity_bin_smooth_;
-
-    pole_cluster_tol_ = options_.pole_cluster_tol_;
-    pole_cluster_min_size_ = options_.pole_cluster_min_size_;
-    pole_cluster_max_size_ = options_.pole_cluster_max_size_;
-    pole_fit_max_iters_ = options_.pole_fit_max_iters_;
-    pole_fit_stop_th_ = options_.pole_fit_stop_th_;
-
     return true;
 }
 
@@ -195,12 +154,6 @@ bool LaserMapping::Run() {
 
     /// IMU process, kf prediction, undistortion
     p_imu_->Process(measures_, kf_, scan_undistort_);
-
-    /// 以 IMU 预测位姿为中心维护 rolling submap
-    SE3 pred_pose = kf_.GetX().GetPose();
-    if (!submap_inited_ || NeedRebuildSubmap(pred_pose)) {
-        RebuildSubmap(pred_pose);
-    }
 
     if (scan_undistort_->empty() || (scan_undistort_ == nullptr)) {
         LOG(WARNING) << "No point, skip this scan!";
@@ -255,21 +208,18 @@ bool LaserMapping::Run() {
     voxel_scan_.filter(*scan_down_body_);
 
     int cur_pts = scan_down_body_->size();
+    //调试打印0328
+    LOG(INFO) << "[DBG][downsample] frame=" << scan_count_
+          << " undistort_size=" << (scan_undistort_ ? scan_undistort_->size() : 0)
+          << " down_body_size=" << scan_down_body_->size()
+          << " map_grids=" << (ivox_ ? ivox_->NumValidGrids() : 0);    
+    
     if (cur_pts < 5) {
         LOG(WARNING) << "Too few points, skip this scan!" << scan_undistort_->size() << ", " << scan_down_body_->size();
         return false;
     }
     scan_down_world_->resize(cur_pts);
     nearest_points_.resize(cur_pts);
-
-    /// 提取当前帧高强度候选和反光柱 landmark
-    current_frame_poles_.clear();
-    high_intensity_cloud_->clear();
-
-    if (options_.use_pole_landmark_) {
-        ExtractHighIntensityCandidatesByRangeBins(scan_down_body_, high_intensity_cloud_, intensity_bin_thresholds_);
-        ExtractPoleLandmarksFromCloud(high_intensity_cloud_, current_frame_poles_);
-    }
 
     Timer::Evaluate(
         [&, this]() {
@@ -299,20 +249,6 @@ bool LaserMapping::Run() {
         },
         "IEKF Solve and Update");
 
-    for (auto& pole : current_frame_poles_) {
-        pole.axis_point_ = state_point_.rot_ * pole.axis_point_body_ + state_point_.pos_;
-        pole.axis_dir_ = state_point_.rot_ * pole.axis_dir_body_;
-        pole.axis_dir_.normalize();
-    }
-
-    /// 坏帧必须在写图前拦截
-    if (current_frame_degenerate_) {
-        LOG(WARNING) << "[DEGENERATE][run] skip mapping/keyframe frame=" << scan_count_
-                     << " nn_fail=" << current_nn_fail_
-                     << " valid_ratio=" << current_valid_ratio_
-                     << " pole_matches=" << current_pole_match_num_;
-        return false;
-    }
 
     // update local map
     Timer::Evaluate([&, this]() { MapIncremental(); }, "    Incremental Mapping");
@@ -355,8 +291,6 @@ bool LaserMapping::Run() {
 void LaserMapping::MakeKF() {
     Keyframe::Ptr kf = std::make_shared<Keyframe>(kf_id_++, scan_undistort_, state_point_);
 
-    kf->SetPoles(current_frame_poles_);
-
     if (last_kf_) {
         // LOG(INFO) << "last kf lio: " << last_kf_->GetLIOPose().translation().transpose()
         //           << ", opt: " << last_kf_->GetOptPose().translation().transpose();
@@ -369,6 +303,7 @@ void LaserMapping::MakeKF() {
     }
 
     kf->SetState(state_point_);
+
 
     LOG(INFO) << "LIO: create kf " << kf->GetID() << ", state: " << state_point_.pos_.transpose()
               << ", kf opt pose: " << kf->GetOptPose().translation().transpose()
@@ -398,6 +333,12 @@ void LaserMapping::ProcessPointCloud2(const sensor_msgs::msg::PointCloud2::Share
 
             CloudPtr cloud(new PointCloudType());
             preprocess_->Process(msg, cloud);
+	    // 调试打印0328
+	    LOG(INFO) << "[DBG][preprocess_ros2] frame=" << scan_count_
+			  << " stamp=" << std::setprecision(14) << timestamp
+			  << " cloud_size_after_preprocess=" << cloud->size()
+			  << " latest_imu=" << last_timestamp_imu_;
+
 
             lidar_buffer_.push_back(cloud);
             time_buffer_.push_back(timestamp);
@@ -498,97 +439,13 @@ bool LaserMapping::SyncPackages() {
     lidar_buffer_.pop_front();
     time_buffer_.pop_front();
     lidar_pushed_ = false;
-
+    // 调试打印0327
+    LOG(INFO) << "scan duration used by system: "
+          << measures_.scan_->points.back().time / 1000.0 << " s";
     // LOG(INFO) << "sync: " << std::setprecision(14) << measures_.lidar_begin_time_ << ", " <<
     // measures_.lidar_end_time_;
 
     return true;
-}
-
-bool LaserMapping::NeedRebuildSubmap(const SE3& pred_pose) const {
-    if (!submap_inited_) {
-        return true;
-    }
-
-    double dt = (last_submap_pose_.translation() - pred_pose.translation()).norm();
-    double dr = (last_submap_pose_.so3().inverse() * pred_pose.so3()).log().norm();
-
-    if (dt > submap_rebuild_trans_th_) {
-        return true;
-    }
-    if (dr > submap_rebuild_rot_th_) {
-        return true;
-    }
-
-    return false;
-}
-
-void LaserMapping::RebuildSubmap(const SE3& pred_pose) {
-    submap_cache_.geom_cloud_->clear();
-    submap_cache_.poles_.clear();
-
-    if (all_keyframes_.empty()) {
-        ivox_.reset(new IVoxType(ivox_options_));
-        submap_inited_ = true;
-        last_submap_pose_ = pred_pose;
-        return;
-    }
-
-    std::vector<Keyframe::Ptr> selected_kfs;
-    selected_kfs.reserve(submap_kf_window_);
-
-    /// 先按距离筛，再限制窗口大小
-    for (int i = static_cast<int>(all_keyframes_.size()) - 1; i >= 0; --i) {
-        auto& kf = all_keyframes_[i];
-        double dist = (kf->GetLIOPose().translation() - pred_pose.translation()).norm();
-        if (dist < submap_radius_) {
-            selected_kfs.emplace_back(kf);
-        }
-        if (selected_kfs.size() >= static_cast<size_t>(submap_kf_window_)) {
-            break;
-        }
-    }
-
-    if (selected_kfs.empty()) {
-        selected_kfs.emplace_back(all_keyframes_.back());
-    }
-
-    pcl::VoxelGrid<PointType> voxel;
-    voxel.setLeafSize(filter_size_map_min_, filter_size_map_min_, filter_size_map_min_);
-
-    for (auto& kf : selected_kfs) {
-        CloudPtr cloud = kf->GetCloud();
-        if (cloud == nullptr || cloud->empty()) {
-            continue;
-        }
-
-        CloudPtr cloud_trans(new PointCloudType);
-        pcl::transformPointCloud(*cloud, *cloud_trans, kf->GetLIOPose().matrix());
-
-        *submap_cache_.geom_cloud_ += *cloud_trans;
-
-        for (auto& pole : kf->GetPoles()) {
-             submap_cache_.poles_.emplace_back(pole);
-        }
-    }
-
-    CloudPtr filtered(new PointCloudType);
-    voxel.setInputCloud(submap_cache_.geom_cloud_);
-    voxel.filter(*filtered);
-    submap_cache_.geom_cloud_ = filtered;
-
-    ivox_.reset(new IVoxType(ivox_options_));
-    ivox_->AddPoints(submap_cache_.geom_cloud_->points);
-
-    submap_cache_.center_pose_ = pred_pose;
-    submap_cache_.end_kf_id_ = selected_kfs.front()->GetID();
-
-    submap_inited_ = true;
-    last_submap_pose_ = pred_pose;
-
-    LOG(INFO) << "[submap] rebuild, kfs=" << selected_kfs.size()
-              << ", pts=" << submap_cache_.geom_cloud_->size()
-              << ", grids=" << ivox_->NumValidGrids();
 }
 
 void LaserMapping::MapIncremental() {
@@ -650,379 +507,16 @@ void LaserMapping::MapIncremental() {
             ivox_->AddPoints(point_no_need_downsample);
         },
         "    IVox Add Points");
+        
+    //调试打印0328
+    LOG(INFO) << "[DBG][map_incremental] frame=" << scan_count_
+          << " points_to_add=" << points_to_add.size()
+          << " point_no_need_downsample=" << point_no_need_downsample.size()
+          << " map_pts=" << (ivox_ ? ivox_->NumPoints() : 0)
+          << " map_grids=" << (ivox_ ? ivox_->NumValidGrids() : 0);
+    
 }
 
-void LaserMapping::ExtractHighIntensityCandidatesByRangeBins(
-    const CloudPtr& cloud_in,
-    CloudPtr& cloud_out,
-    std::vector<float>& adaptive_thresholds) const {
-
-    cloud_out->clear();
-    adaptive_thresholds.clear();
-
-    if (cloud_in == nullptr || cloud_in->empty()) {
-        return;
-    }
-
-    const float BIN_SIZE = intensity_bin_size_;
-    const int MAX_BINS = intensity_max_bins_;
-    const float QUANTILE = intensity_quantile_;
-    const int MIN_BIN_POINTS = intensity_min_bin_points_;
-
-    std::vector<std::vector<float>> bins(MAX_BINS);
-
-    for (const auto& pt : cloud_in->points) {
-        float range = pt.getVector3fMap().norm();
-        int bin_id = std::min(MAX_BINS - 1, std::max(0, int(range / BIN_SIZE)));
-        bins[bin_id].push_back(pt.intensity);
-    }
-
-    adaptive_thresholds.resize(MAX_BINS, std::numeric_limits<float>::quiet_NaN());
-
-    for (int i = 0; i < MAX_BINS; ++i) {
-        auto& vals = bins[i];
-        if (static_cast<int>(vals.size()) < MIN_BIN_POINTS) {
-            continue;
-        }
-
-        std::sort(vals.begin(), vals.end());
-        size_t qid = static_cast<size_t>(QUANTILE * (vals.size() - 1));
-        adaptive_thresholds[i] = vals[qid];
-    }
-
-    /// 空桶回填
-    for (int i = 0; i < MAX_BINS; ++i) {
-        if (std::isfinite(adaptive_thresholds[i])) continue;
-
-        int l = i - 1, r = i + 1;
-        while (l >= 0 && !std::isfinite(adaptive_thresholds[l])) --l;
-        while (r < MAX_BINS && !std::isfinite(adaptive_thresholds[r])) ++r;
-
-        if (l >= 0 && r < MAX_BINS) {
-            adaptive_thresholds[i] = 0.5f * (adaptive_thresholds[l] + adaptive_thresholds[r]);
-        } else if (l >= 0) {
-            adaptive_thresholds[i] = adaptive_thresholds[l];
-        } else if (r < MAX_BINS) {
-            adaptive_thresholds[i] = adaptive_thresholds[r];
-        }
-    }
-
-    /// 平滑
-    if (intensity_bin_smooth_ && MAX_BINS >= 3) {
-        std::vector<float> smoothed = adaptive_thresholds;
-        for (int i = 1; i < MAX_BINS - 1; ++i) {
-            if (std::isfinite(adaptive_thresholds[i - 1]) &&
-                std::isfinite(adaptive_thresholds[i]) &&
-                std::isfinite(adaptive_thresholds[i + 1])) {
-                smoothed[i] = 0.25f * adaptive_thresholds[i - 1] +
-                              0.5f  * adaptive_thresholds[i] +
-                              0.25f * adaptive_thresholds[i + 1];
-            }
-        }
-        adaptive_thresholds.swap(smoothed);
-    }
-
-    for (const auto& pt : cloud_in->points) {
-        float range = pt.getVector3fMap().norm();
-        int bin_id = std::min(MAX_BINS - 1, std::max(0, int(range / BIN_SIZE)));
-
-        float th = adaptive_thresholds[bin_id];
-        if (std::isfinite(th) && pt.intensity >= th) {
-            cloud_out->points.push_back(pt);
-        }
-    }
-
-    cloud_out->width = cloud_out->size();
-    cloud_out->height = 1;
-    cloud_out->is_dense = false;
-}
-
-void LaserMapping::ExtractPoleLandmarksFromCloud(
-    const CloudPtr& cloud_in,
-    std::vector<PoleLandmark>& poles_out) const {
-
-    poles_out.clear();
-    if (cloud_in == nullptr || cloud_in->empty()) {
-        return;
-    }
-
-    pcl::search::KdTree<PointType>::Ptr tree(new pcl::search::KdTree<PointType>());
-    tree->setInputCloud(cloud_in);
-
-    std::vector<pcl::PointIndices> cluster_indices;
-    pcl::EuclideanClusterExtraction<PointType> ec;
-    ec.setClusterTolerance(pole_cluster_tol_);
-    ec.setMinClusterSize(pole_cluster_min_size_);
-    ec.setMaxClusterSize(pole_cluster_max_size_);
-    ec.setSearchMethod(tree);
-    ec.setInputCloud(cloud_in);
-    ec.extract(cluster_indices);
-
-    for (const auto& indices : cluster_indices) {
-        CloudPtr cluster(new PointCloudType);
-        cluster->reserve(indices.indices.size());
-        for (int idx : indices.indices) {
-            cluster->push_back(cloud_in->points[idx]);
-        }
-
-        PoleLandmark pole;
-        if (FitCylinderAxis(cluster, pole)) {
-            poles_out.emplace_back(pole);
-        }
-    }
-}
-
-bool LaserMapping::FitCylinderAxis(
-    const CloudPtr& cluster,
-    PoleLandmark& pole) const {
-
-    if (cluster == nullptr || cluster->size() < 8) {
-        return false;
-    }
-
-    // ---------- 1) PCA 初始化 ----------
-    Vec3d mean = Vec3d::Zero();
-    for (const auto& pt : cluster->points) {
-        mean += pt.getVector3fMap().cast<double>();
-    }
-    mean /= double(cluster->size());
-
-    Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
-    for (const auto& pt : cluster->points) {
-        Vec3d d = pt.getVector3fMap().cast<double>() - mean;
-        cov += d * d.transpose();
-    }
-    cov /= double(cluster->size());
-
-    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> es(cov);
-    if (es.info() != Eigen::Success) {
-        return false;
-    }
-
-    Vec3d c = mean;
-    Vec3d u = es.eigenvectors().col(2).normalized();
-    if (u.dot(Vec3d::UnitZ()) < 0) {
-        u = -u;
-    }
-
-    double max_tilt_rad = options_.pole_max_tilt_deg_ * M_PI / 180.0;
-    double init_ang = std::acos(std::clamp(std::abs(u.dot(Vec3d::UnitZ())), -1.0, 1.0));
-    if (init_ang > max_tilt_rad) {
-        return false;
-    }
-
-    // ---------- 2) 固定半径柱面 GN 精化 ----------
-    const double r = options_.pole_radius_;
-
-    Vec3d ref = (std::abs(u.z()) < 0.9) ? Vec3d::UnitZ() : Vec3d::UnitX();
-    Vec3d b1 = (ref - ref.dot(u) * u).normalized();
-    Vec3d b2 = u.cross(b1).normalized();
-
-    for (int iter = 0; iter < pole_fit_max_iters_; ++iter) {
-        Eigen::Matrix<double, 5, 5> H = Eigen::Matrix<double, 5, 5>::Zero();
-        Eigen::Matrix<double, 5, 1> g = Eigen::Matrix<double, 5, 1>::Zero();
-
-        int valid_cnt = 0;
-
-        for (const auto& pt : cluster->points) {
-            Vec3d p = pt.getVector3fMap().cast<double>();
-            Vec3d d = p - c;
-            double proj = d.dot(u);
-            Vec3d radial = d - proj * u;
-            double nr = radial.norm();
-            if (nr < 1e-8) {
-                continue;
-            }
-
-            double e = nr - r;
-            valid_cnt++;
-            //
-            Eigen::RowVector3d de_dc =
-                -(radial.transpose() / nr) * (Mat3d::Identity() - u * u.transpose());
-
-            Eigen::RowVector3d de_du =
-                -(proj / nr) * radial.transpose();
-
-            double de_da = de_du.dot(b1);
-            double de_db = de_du.dot(b2);
-
-            Eigen::Matrix<double, 1, 5> J;
-            J << de_dc(0), de_dc(1), de_dc(2), de_da, de_db;
-
-            H += J.transpose() * J;
-            g += J.transpose() * e;
-        }
-
-        if (valid_cnt < 6) {
-            return false;
-        }
-
-        Eigen::Matrix<double, 5, 1> dx = -H.ldlt().solve(g);
-        if (!dx.allFinite()) {
-            return false;
-        }
-
-        c += dx.head<3>();
-        Vec3d du = dx(3) * b1 + dx(4) * b2;
-        u = (u + du).normalized();
-        if (u.dot(Vec3d::UnitZ()) < 0) {
-            u = -u;
-        }
-
-        ref = (std::abs(u.z()) < 0.9) ? Vec3d::UnitZ() : Vec3d::UnitX();
-        b1 = (ref - ref.dot(u) * u).normalized();
-        b2 = u.cross(b1).normalized();
-
-        if (dx.norm() < pole_fit_stop_th_) {
-            break;
-        }
-    }
-
-    // ---------- 3) 再做几何一致性检查 ----------
-    double ang = std::acos(std::clamp(std::abs(u.dot(Vec3d::UnitZ())), -1.0, 1.0));
-    if (ang > max_tilt_rad) {
-        return false;
-    }
-
-    std::vector<double> radial_dists;
-    radial_dists.reserve(cluster->size());
-
-    double min_proj = std::numeric_limits<double>::max();
-    double max_proj = -std::numeric_limits<double>::max();
-    double mean_intensity = 0.0;
-
-    for (const auto& pt : cluster->points) {
-        Vec3d p = pt.getVector3fMap().cast<double>();
-        Vec3d d = p - c;
-        double proj = d.dot(u);
-        min_proj = std::min(min_proj, proj);
-        max_proj = std::max(max_proj, proj);
-
-        Vec3d radial = d - proj * u;
-        radial_dists.push_back(radial.norm());
-
-        mean_intensity += pt.intensity;
-    }
-
-    mean_intensity /= double(cluster->size());
-    std::sort(radial_dists.begin(), radial_dists.end());
-    double radius = radial_dists[radial_dists.size() / 2];
-    double length = max_proj - min_proj;
-
-    if (std::abs(radius - options_.pole_radius_) > options_.pole_radius_tol_) {
-        return false;
-    }
-
-    if (length < options_.pole_length_min_ || length > options_.pole_length_max_) {
-        return false;
-    }
-
-    pole.axis_point_body_ = c;
-    pole.axis_dir_body_ = u;
-
-    pole.axis_point_ = c;
-    pole.axis_dir_ = u;
-
-    pole.radius_ = radius;
-    pole.length_ = length;
-    pole.mean_intensity_ = mean_intensity;
-    pole.support_ = static_cast<int>(cluster->size());
-    pole.timestamp_ = state_point_.timestamp_;
-
-    return true;
-}
-
-void LaserMapping::MatchPoleLandmarks(
-    const std::vector<PoleLandmark>& cur_poles,
-    const std::vector<PoleLandmark>& map_poles,
-    std::vector<std::pair<int, int>>& matches) const {
-
-    matches.clear();
-    if (cur_poles.empty() || map_poles.empty()) {
-        return;
-    }
-
-    double angle_th = options_.pole_match_angle_deg_ * M_PI / 180.0;
-
-    for (int i = 0; i < static_cast<int>(cur_poles.size()); ++i) {
-        double best_dist = 1e9;
-        int best_j = -1;
-
-        for (int j = 0; j < static_cast<int>(map_poles.size()); ++j) {
-            double ang = std::acos(std::clamp(
-                std::abs(cur_poles[i].axis_dir_.dot(map_poles[j].axis_dir_)),
-                -1.0, 1.0));
-            if (ang > angle_th) {
-                continue;
-            }
-
-            double dist = (cur_poles[i].axis_point_ - map_poles[j].axis_point_).head<2>().norm();
-            if (dist < options_.pole_match_dist_th_ && dist < best_dist) {
-                best_dist = dist;
-                best_j = j;
-            }
-        }
-
-        if (best_j >= 0) {
-            matches.emplace_back(i, best_j);
-        }
-    }
-}
-
-void LaserMapping::BuildPoleResiduals(
-    const std::vector<PoleLandmark>& cur_poles,
-    const std::vector<PoleLandmark>& map_poles,
-    const std::vector<std::pair<int, int>>& matches,
-    NavState& s,
-    ESKF::CustomObservationModel& obs) const {
-
-    if (matches.empty()) {
-        return;
-    }
-
-    int old_rows = obs.h_x_.rows();
-    int add_rows = static_cast<int>(matches.size()) * 2;
-
-    Eigen::MatrixXd h_new = Eigen::MatrixXd::Zero(old_rows + add_rows, 12);
-    Eigen::VectorXd r_new = Eigen::VectorXd::Zero(old_rows + add_rows);
-
-    if (old_rows > 0) {
-        h_new.topRows(old_rows) = obs.h_x_;
-        r_new.head(old_rows) = obs.residual_;
-    }
-
-    int row = old_rows;
-    Mat3d Rwb = s.rot_.matrix();
-
-    for (const auto& m : matches) {
-        const auto& pc = cur_poles[m.first];
-        const auto& pm = map_poles[m.second];
-
-        /// body系柱心 -> world系
-        Vec3d p_b = pc.axis_point_body_;
-        Vec3d p_w = s.rot_ * p_b + s.pos_;
-
-        Vec2d res = (pm.axis_point_ - p_w).head<2>();
-
-        Eigen::Matrix<double, 2, 12> J = Eigen::Matrix<double, 2, 12>::Zero();
-
-        /// 对位置误差增量的导数
-        J.block<2, 3>(0, 0) = -Eigen::Matrix<double, 2, 3>::Identity();
-
-        /// 对旋转误差增量的导数
-        Mat3d px = math::SKEW_SYM_MATRIX(p_b);
-        J.block<2, 3>(0, 3) = -(Rwb * px).topRows<2>();
-
-        /// 这里暂时不对外参建 pole 约束，后 6 维保留为 0
-
-        h_new.block(row, 0, 2, 12) = J;
-        r_new.segment<2>(row) = res;
-        row += 2;
-    }
-
-    obs.h_x_ = h_new;
-    obs.residual_ = r_new;
-}
 /**
  * Lidar point cloud registration
  * will be called by the eskf custom observation model
@@ -1030,16 +524,9 @@ void LaserMapping::BuildPoleResiduals(
  * @param s kf state
  * @param ekfom_data H matrix
  */
+ 
 void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
     int cnt_pts = scan_down_body_->size();
-
-    current_frame_degenerate_ = false;
-    current_nn_fail_ = 0;
-    current_plane_fail_ = 0;
-    current_residual_fail_ = 0;
-    current_valid_ratio_ = 0.0;
-    current_nn_fail_ratio_ = 0.0;
-    current_pole_match_num_ = 0;
 
     std::vector<size_t> index(cnt_pts);
     for (size_t i = 0; i < index.size(); ++i) {
@@ -1065,7 +552,7 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
 
                 /** Find the closest surfaces in the map **/
                 // if (obs.converge_) {
-                ivox_->GetClosestPoint(point_world, points_near, fasterlio::NUM_MATCH_POINTS,20.0);
+                ivox_->GetClosestPoint(point_world, points_near, fasterlio::NUM_MATCH_POINTS);
                 point_selected_surf_[i] = points_near.size() >= fasterlio::MIN_NUM_MATCH_POINTS;
                 if (point_selected_surf_[i]) {
                     point_selected_surf_[i] =
@@ -1088,53 +575,6 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
             });
         },
         "    ObsModel (Lidar Match)");
-    
-    int dbg_nn_fail = 0;
-    int dbg_plane_fail = 0;
-    int dbg_residual_fail = 0;
-    int dbg_valid = 0;
-
-    for (int i = 0; i < cnt_pts; ++i) {
-        if (nearest_points_[i].size() < fasterlio::MIN_NUM_MATCH_POINTS) {
-            dbg_nn_fail++;
-            continue;
-        }
-        if (!point_selected_surf_[i]) {
-            /// 这里 point_selected_surf_ 为 false 既可能是 plane fail，也可能是 residual fail
-            /// 简单起见先按 residual / plane 粗分
-            if (std::abs(residuals_[i]) < 0.5) {
-                dbg_plane_fail++;
-            } else {
-                dbg_residual_fail++;
-            }
-            continue;
-        }
-        dbg_valid++;
-    }
-
-    current_nn_fail_ = dbg_nn_fail;
-    current_plane_fail_ = dbg_plane_fail;
-    current_residual_fail_ = dbg_residual_fail;
-    if (cnt_pts > 0) {
-        current_nn_fail_ratio_ = static_cast<double>(dbg_nn_fail) / static_cast<double>(cnt_pts);
-        current_valid_ratio_ = static_cast<double>(dbg_valid) / static_cast<double>(cnt_pts);
-    }
-
-    if ((cnt_pts > 3000 && current_nn_fail_ratio_ > 0.20) ||
-        (cnt_pts > 3000 && current_valid_ratio_ < 0.80) ||
-        (dbg_valid < 500)) {
-        current_frame_degenerate_ = true;
-        obs.valid_ = false;
-
-        LOG(WARNING) << "[DEGENERATE][obsmodel] reject frame="
-                     << scan_count_
-                     << " cnt_pts=" << cnt_pts
-                     << " nn_fail=" << dbg_nn_fail
-                     << " valid=" << dbg_valid
-                     << " nn_fail_ratio=" << current_nn_fail_ratio_
-                     << " valid_ratio=" << current_valid_ratio_;
-        return;
-    }
 
     effect_feat_num_ = 0;
 
@@ -1214,17 +654,6 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
             });
         },
         "    ObsModel (IEKF Build Jacobian)");
-    
-    if (options_.use_pole_landmark_ && !current_frame_poles_.empty() && !submap_cache_.poles_.empty()) {
-        std::vector<std::pair<int, int>> pole_matches;
-        MatchPoleLandmarks(current_frame_poles_, submap_cache_.poles_, pole_matches);
-        current_pole_match_num_ = static_cast<int>(pole_matches.size());
-
-        if (!pole_matches.empty()) {
-            //注意：先不用反光柱这个特征点信息了，后续如果要加，可以在这里调用 BuildPoleResiduals 来构建残差和雅可比
-            //BuildPoleResiduals(current_frame_poles_, submap_cache_.poles_, pole_matches, s, obs);
-        }
-    }    
 
     /// 填入中位数平方误差
     std::vector<double> res_sq2;

@@ -14,7 +14,6 @@
 #include "core/lio/eskf.hpp"
 #include "core/lio/imu_processing.hpp"
 #include "pointcloud_preprocess.h"
-#include "common/pole_landmark.h"
 
 #include "livox_ros_driver2/msg/custom_msg.hpp"
 
@@ -31,47 +30,11 @@ class PangolinWindow;
  */
 class LaserMapping {
    public:
-    struct SubmapCache {
-        CloudPtr geom_cloud_{new PointCloudType()};
-        std::vector<PoleLandmark> poles_;
-        SE3 center_pose_;
-        int end_kf_id_ = -1;
-    };
-
     struct Options {
         Options() {}
 
         bool is_in_slam_mode_ = true;  // 是否在slam模式下
 
-        /// rolling submap
-        int submap_kf_window_ = 20;
-        double submap_radius_ = 25.0;
-
-        /// pole extraction
-        bool use_pole_landmark_ = true;
-        double pole_radius_ = 0.0375;
-        double pole_radius_tol_ = 0.02;
-        double pole_length_min_ = 0.2;
-        double pole_length_max_ = 1.0;
-        double pole_max_tilt_deg_ = 8.0;
-        double pole_match_dist_th_ = 1.5;
-        double pole_match_angle_deg_ = 10.0;
-
-        /// intensity range-bin adaptive threshold
-        float intensity_bin_size_ = 5.0f;
-        int intensity_max_bins_ = 40;
-        float intensity_quantile_ = 0.99f;
-        int intensity_min_bin_points_ = 50;
-        bool intensity_bin_smooth_ = true;
-
-        /// pole cluster
-        double pole_cluster_tol_ = 0.10;
-        int pole_cluster_min_size_ = 8;
-        int pole_cluster_max_size_ = 200;
-
-        /// pole GN fit
-        int pole_fit_max_iters_ = 5;
-        double pole_fit_stop_th_ = 1e-4;
         /// 关键帧阈值
         double kf_dis_th_ = 2.0;
         double kf_angle_th_ = 15 * M_PI / 180.0;
@@ -148,42 +111,6 @@ class LaserMapping {
 
     void ObsModel(NavState &s, ESKF::CustomObservationModel &obs);
 
-    /// 是否需要重建 rolling submap
-    bool NeedRebuildSubmap(const SE3& pred_pose) const;
-
-    /// 使用最近关键帧重建 rolling submap
-    void RebuildSubmap(const SE3& pred_pose);
-
-    /// 从当前帧提取高强度候选点（距离分桶自适应阈值）
-    void ExtractHighIntensityCandidatesByRangeBins(
-        const CloudPtr& cloud_in,
-        CloudPtr& cloud_out,
-        std::vector<float>& adaptive_thresholds) const;
-
-    /// 对高强度候选点做聚类并拟合反光柱轴线
-    void ExtractPoleLandmarksFromCloud(
-        const CloudPtr& cloud_in,
-        std::vector<PoleLandmark>& poles_out) const;
-
-    /// 用柱面模型拟合轴线，要求接近竖直
-    bool FitCylinderAxis(
-        const CloudPtr& cluster,
-        PoleLandmark& pole) const;
-
-    /// 当前帧反光柱与 submap 中反光柱匹配
-    void MatchPoleLandmarks(
-        const std::vector<PoleLandmark>& cur_poles,
-        const std::vector<PoleLandmark>& map_poles,
-        std::vector<std::pair<int, int>>& matches) const;
-
-    /// 建立反光柱 landmark 约束
-    void BuildPoleResiduals(
-        const std::vector<PoleLandmark>& cur_poles,
-        const std::vector<PoleLandmark>& map_poles,
-        const std::vector<std::pair<int, int>>& matches,
-        NavState& s,
-        ESKF::CustomObservationModel& obs) const;
-
     inline void PointBodyToWorld(const PointType &pi, PointType &po) {
         Vec3d p_global(state_point_.rot_ * (state_point_.offset_R_lidar_ * pi.getVector3fMap().cast<double>() +
                                             state_point_.offset_t_lidar_) +
@@ -202,6 +129,7 @@ class LaserMapping {
     /// 创建关键帧
     void MakeKF();
 
+
    private:
     Options options_;
 
@@ -214,28 +142,6 @@ class LaserMapping {
     /// local map related
     double filter_size_map_min_ = 0;
 
-    /// rolling submap related
-    SubmapCache submap_cache_;
-    bool submap_inited_ = false;
-    SE3 last_submap_pose_;
-
-    int submap_kf_window_ = 20;
-    double submap_radius_ = 25.0;
-    double submap_rebuild_trans_th_ = 2.0;
-    double submap_rebuild_rot_th_ = 10.0 * M_PI / 180.0;
-
-    float intensity_bin_size_ = 5.0f;
-    int intensity_max_bins_ = 40;
-    float intensity_quantile_ = 0.99f;
-    int intensity_min_bin_points_ = 50;
-    bool intensity_bin_smooth_ = true;
-
-    double pole_cluster_tol_ = 0.10;
-    int pole_cluster_min_size_ = 8;
-    int pole_cluster_max_size_ = 200;
-
-    int pole_fit_max_iters_ = 5;
-    double pole_fit_stop_th_ = 1e-4;
     /// params
     std::vector<double> extrinT_{3, 0.0};  // lidar-imu translation
     std::vector<double> extrinR_{9, 0.0};  // lidar-imu rotation
@@ -255,17 +161,6 @@ class LaserMapping {
     pcl::VoxelGrid<PointType> voxel_scan_;            // voxel filter for current scan
 
     std::vector<float> residuals_;           // point-to-plane residuals
-
-    /// pole landmark
-    std::vector<PoleLandmark> current_frame_poles_;
-    std::vector<PoleLandmark> all_pole_landmarks_;
-
-    /// 当前帧高强度候选点（调试和提柱用）
-    CloudPtr high_intensity_cloud_{new PointCloudType()};
-
-    /// 距离分桶阈值缓存
-    mutable std::vector<float> intensity_bin_thresholds_;
-
     std::vector<bool> point_selected_surf_;  // selected points
     std::vector<Vec4f> plane_coef_;          // plane coeffs
 
@@ -296,17 +191,6 @@ class LaserMapping {
     double lidar_mean_scantime_ = 0.0;
     int scan_num_ = 0;
     int effect_feat_num_ = 0, frame_num_ = 0;
-
-    /// 当前帧退化统计
-    int current_nn_fail_ = 0;
-    int current_plane_fail_ = 0;
-    int current_residual_fail_ = 0;
-    double current_valid_ratio_ = 0.0;
-    double current_nn_fail_ratio_ = 0.0;
-    bool current_frame_degenerate_ = false;
-
-    /// 当前帧 landmark 匹配数量
-    int current_pole_match_num_ = 0;
 
     double last_lidar_time_ = 0;
 
