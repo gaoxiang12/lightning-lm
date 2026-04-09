@@ -152,7 +152,7 @@ void LoopClosing::ComputeLoopCandidates() {
     // 保存成功的候选
     std::vector<LoopCandidate> succ_candidates;
     for (const auto& lc : candidates_) {
-        // LOG(INFO) << "candi " << lc.idx1_ << ", " << lc.idx2_ << " s: " << lc.ndt_score_;
+        LOG(INFO) << "candi " << lc.idx1_ << ", " << lc.idx2_ << " s: " << lc.ndt_score_;
         if (lc.ndt_score_ > options_.ndt_score_th_) {
             succ_candidates.emplace_back(lc);
         }
@@ -303,9 +303,9 @@ void LoopClosing::PoseOptimization() {
         return;
     }
 
-    if (candidates_.empty()) {
-        return;
-    }
+    // if (candidates_.empty()) {
+    //     return;
+    // }
 
     optimizer_->InitializeOptimization();
     optimizer_->SetVerbose(false);
