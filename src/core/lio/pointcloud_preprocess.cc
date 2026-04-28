@@ -67,9 +67,9 @@ void PointCloudPreprocess::Process(const livox_ros_driver2::msg::CustomMsg::Shar
             return;
         }
 
-        if ((abs(cloud_full_[i].x - cloud_full_[i - 1].x) > 1e-7) ||
+        if (((abs(cloud_full_[i].x - cloud_full_[i - 1].x) > 1e-7) ||
             (abs(cloud_full_[i].y - cloud_full_[i - 1].y) > 1e-7) ||
-            (abs(cloud_full_[i].z - cloud_full_[i - 1].z) > 1e-7) &&
+            (abs(cloud_full_[i].z - cloud_full_[i - 1].z) > 1e-7)) &&
                 (cloud_full_[i].x * cloud_full_[i].x + cloud_full_[i].y * cloud_full_[i].y +
                      cloud_full_[i].z * cloud_full_[i].z >
                  (blind_ * blind_))) {
