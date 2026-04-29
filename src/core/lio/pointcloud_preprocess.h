@@ -14,8 +14,6 @@ namespace lightning {
 
 enum class LidarType { AVIA = 1, VELO32, OUST64 };
 
-
-
 /**
  * point cloud preprocess
  * just unify the point format from livox/velodyne to PCL

@@ -9,18 +9,18 @@ common:
 fasterlio:
   lidar_type: 2                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR,
   scan_line: 16
-  blind: 0.5                # 盲区，小于盲区距离的不会处理
-  time_scale: 1e-3             # 兼容不同数据集的时间单位，仅对Velodyne LiDAR(lidar_type=2)生效
+  blind: 0                # 盲区，小于盲区距离的不会处理
+  time_scale: 1000             # 兼容不同数据集的时间单位，仅对Velodyne LiDAR(lidar_type=2)生效
 
   skip_lidar_num: 0 # 点云的跳帧情况
-  point_filter_num: 10 # 点云采样参数
+  point_filter_num: 1 # 点云采样参数
   max_iteration: 6 # 最大迭代次数
-  filter_size_scan: 0.5 # 对scan进行的降采样
-  filter_size_map: 0.5
+  filter_size_scan: 0.8 # 对scan进行的降采样
+  filter_size_map: 0.8
 
-  ivox_grid_resolution: 0.5        # default=0.2
+  ivox_grid_resolution: 0.1        # default=0.2
   ivox_nearby_type: 18             # 6, 18, 26
-  esti_plane_threshold: 0.1        # default=0.1
+  esti_plane_threshold: 0.15        # default=0.1
 
   use_aa: false  # use anderson-acceleration
 
@@ -34,31 +34,6 @@ fasterlio:
                  0, 1, 0,
                  0, 0, 1 ]
   keep_first_imu_estimation: false
-  #新增
-  submap_kf_window: 20
-  submap_radius: 25.0
-
-  use_pole_landmark: true
-  pole_radius: 0.0375
-  pole_radius_tol: 0.02
-  pole_length_min: 0.2
-  pole_length_max: 1.0
-  pole_max_tilt_deg: 8.0
-  pole_match_dist_th: 1.5
-  pole_match_angle_deg: 10.0
-
-  pole_cluster_tol: 0.10
-  pole_cluster_min_size: 8
-  pole_cluster_max_size: 200
-
-  pole_fit_max_iters: 5
-  pole_fit_stop_th: 1e-4
-
-  intensity_bin_size: 5.0
-  intensity_max_bins: 40
-  intensity_quantile: 0.99
-  intensity_min_bin_points: 50
-  intensity_bin_smooth: true
 
 
 g2p5:
@@ -71,7 +46,7 @@ g2p5:
 
 system:
   with_loop_closing: false # 是否需要回环检测
-  with_ui: false # 是否需要3D UI
+  with_ui: true # 是否需要3D UI
   with_2dui: false # 是否需要2D UI
   with_g2p5: false # 是否需要栅格地图
   step_on_kf: false # 是否在关键帧处暂停
