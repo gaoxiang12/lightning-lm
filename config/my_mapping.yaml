@@ -45,6 +45,7 @@ g2p5:
   grid_map_resolution: 0.2 # 栅格地图分辨率
 
 system:
+  frontend: "lio_sam" # options: fasterlio, lio_sam
   with_loop_closing: false # 是否需要回环检测
   with_ui: true # 是否需要3D UI
   with_2dui: false # 是否需要2D UI
@@ -129,3 +130,90 @@ ui:
   car_width: 1.6
   car_height: 1.7
   scans: 1
+
+# LIO-SAM frontend parameters converted from LIO-SAM-mitanai/config/params.yaml.
+# Used only when system.frontend is "lio_sam".
+lio_sam:
+  # Topics
+  pointCloudTopic: "/cx/cloud"
+  imuTopic: "/imu_data"
+  odomTopic: "lio_sam/imu/odom"
+  gpsTopic: "odometry/gpsz"
+
+  # Frames
+  lidarFrame: "laser_link"
+  baselinkFrame: "base_link"
+  odometryFrame: "odom"
+  mapFrame: "map"
+
+  # GPS settings
+  useImuHeadingInitialization: false
+  useGpsElevation: false
+  gpsCovThreshold: 2.0
+  poseCovThreshold: 25.0
+
+  # Export settings
+  savePCD: true
+  savePCDDirectory: "/Downloads/LOAM/"
+
+  # Sensor settings
+  sensor: "velodyne"
+  N_SCAN: 16
+  Horizon_SCAN: 2000
+  downsampleRate: 1
+  lidarMinRange: 0.5
+  lidarMaxRange: 200.0
+
+  # IMU settings
+  imuAccNoise: 3.9939570888238808e-03
+  imuGyrNoise: 1.5636343949698187e-03
+  imuAccBiasN: 6.4356659353532566e-05
+  imuGyrBiasN: 3.5640318696367613e-05
+  imuGravity: 9.80511
+  imuRPYWeight: 0.01
+  extrinsicTrans: [0.0, 0.0, -0.2]
+  extrinsicRot: [1.0, 0.0, 0.0,
+                 0.0, 1.0, 0.0,
+                 0.0, 0.0, 1.0]
+  extrinsicRPY: [1.0, 0.0, 0.0,
+                 0.0, 1.0, 0.0,
+                 0.0, 0.0, 1.0]
+
+  # LOAM feature threshold
+  edgeThreshold: 1.0
+  surfThreshold: 0.1
+  edgeFeatureMinValidNum: 10
+  surfFeatureMinValidNum: 100
+
+  # Voxel filters
+  odometrySurfLeafSize: 0.2
+  mappingCornerLeafSize: 0.1
+  mappingSurfLeafSize: 0.2
+
+  # Robot motion constraint
+  z_tollerance: 1000.0
+  rotation_tollerance: 1000.0
+
+  # CPU params
+  numberOfCores: 4
+  mappingProcessInterval: 0.15
+
+  # Surrounding map
+  surroundingkeyframeAddingDistThreshold: 1.0
+  surroundingkeyframeAddingAngleThreshold: 0.2
+  surroundingKeyframeDensity: 2.0
+  surroundingKeyframeSearchRadius: 50.0
+
+  # Loop closure
+  loopClosureEnableFlag: true
+  loopClosureFrequency: 1.0
+  surroundingKeyframeSize: 50
+  historyKeyframeSearchRadius: 15.0
+  historyKeyframeSearchTimeDiff: 30.0
+  historyKeyframeSearchNum: 25
+  historyKeyframeFitnessScore: 0.3
+
+  # Visualization
+  globalMapVisualizationSearchRadius: 1000.0
+  globalMapVisualizationPoseDensity: 10.0
+  globalMapVisualizationLeafSize: 1.0

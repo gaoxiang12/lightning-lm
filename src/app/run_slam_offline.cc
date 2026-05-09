@@ -53,12 +53,18 @@ int main(int argc, char** argv) {
 
     rosbag
         /// IMU 的处理
+        /*
         .AddImuHandle(imu_topic,
                       [&slam](IMUPtr imu) {
                           slam.ProcessIMU(imu);
                           return true;
                       })
-
+        */
+        .AddImuHandle(imu_topic,
+                      [&slam](sensor_msgs::msg::Imu::SharedPtr imu) {
+                          slam.ProcessIMU(imu);
+                          return true;
+                      })
         /// lidar 的处理
         .AddPointCloud2Handle(lidar_topic,
                               [&slam](sensor_msgs::msg::PointCloud2::SharedPtr msg) {

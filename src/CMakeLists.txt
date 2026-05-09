@@ -9,6 +9,7 @@ add_library(${PROJECT_NAME}.libs SHARED
 
         core/lio/eskf.cc
         core/lio/laser_mapping.cc
+        core/lio/lio_sam/lio_sam_mapping.cc
         core/lio/pointcloud_preprocess.cc
         core/loop_closing/loop_closing.cc
 
@@ -51,12 +52,14 @@ ament_target_dependencies(
         "geometry_msgs"
         "sensor_msgs"
         "nav_msgs"
+        "visualization_msgs"
         "std_srvs"
         "message_filters"
         "pcl_conversions"
         "tf2_ros"
         "tf2"
         "tf2_geometry_msgs"
+        "tf2_eigen"
 )
 
 add_dependencies(${PROJECT_NAME}.libs
@@ -70,6 +73,7 @@ add_subdirectory(core/miao)
 target_link_libraries(${PROJECT_NAME}.libs
         ${third_party_libs}
         ${PCL_LIBRARIES}
+        gtsam
         miao.core
         miao.utils
         livox_interfaces2__rosidl_typesupport_cpp

@@ -1,34 +1,80 @@
-//
-// Created by xiang on 25-5-6.
-//
-
 #include "core/system/slam.h"
+
+#include <filesystem>
+#include <fstream>
+#include <utility>
+
+#include <opencv2/opencv.hpp>
+#include <pcl/io/pcd_io.h>
+#include <yaml-cpp/yaml.h>
+
 #include "core/g2p5/g2p5.h"
 #include "core/lio/laser_mapping.h"
+#include "core/lio/lio_sam/lio_sam_mapping.h"
 #include "core/loop_closing/loop_closing.h"
 #include "core/maps/tiled_map.h"
 #include "ui/pangolin_window.h"
+#include "utils/timer.h"
 #include "wrapper/ros_utils.h"
-
-#include <yaml-cpp/yaml.h>
-#include <filesystem>
-#include <opencv2/opencv.hpp>
 
 namespace lightning {
 
+namespace {
+
+std::string ReadFrontendName(const YAML::Node& yaml) {
+    const YAML::Node system = yaml["system"];
+    if (!system) {
+        return "fasterlio";
+    }
+    if (system["frontend"]) {
+        return system["frontend"].as<std::string>();
+    }
+    if (system["frontend_type"]) {
+        return system["frontend_type"].as<std::string>();
+    }
+    if (system["lio_frontend"]) {
+        return system["lio_frontend"].as<std::string>();
+    }
+    return "fasterlio";
+}
+
+IMUPtr ConvertRosImu(const sensor_msgs::msg::Imu::SharedPtr& msg) {
+    IMUPtr imu = std::make_shared<IMU>();
+    imu->timestamp = ToSec(msg->header.stamp);
+    imu->linear_acceleration =
+        Vec3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
+    imu->angular_velocity = Vec3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
+    return imu;
+}
+
+}  // namespace
+
 SlamSystem::SlamSystem(lightning::SlamSystem::Options options) : options_(options) {
-    /// handle ctrl-c
     signal(SIGINT, lightning::debug::SigHandle);
 }
 
 bool SlamSystem::Init(const std::string& yaml_path) {
-    lio_ = std::make_shared<LaserMapping>();
-    if (!lio_->Init(yaml_path)) {
-        LOG(ERROR) << "failed to init lio module";
-        return false;
+    auto yaml = YAML::LoadFile(yaml_path);
+
+    const std::string frontend = ReadFrontendName(yaml);
+    use_lio_sam_ = frontend == "lio_sam" || frontend == "liosam" || frontend == "LIO-SAM";
+
+    if (use_lio_sam_) {
+        LOG(INFO) << "SLAM frontend: LIO-SAM";
+        lio_sam_ = std::make_shared<LioSamMapping>();
+        if (!lio_sam_->Init(yaml_path)) {
+            LOG(ERROR) << "failed to init lio-sam module";
+            return false;
+        }
+    } else {
+        LOG(INFO) << "SLAM frontend: Faster-LIO";
+        lio_ = std::make_shared<LaserMapping>();
+        if (!lio_->Init(yaml_path)) {
+            LOG(ERROR) << "failed to init lio module";
+            return false;
+        }
     }
 
-    auto yaml = YAML::LoadFile(yaml_path);
     options_.with_loop_closing_ = yaml["system"]["with_loop_closing"].as<bool>();
     options_.with_visualization_ = yaml["system"]["with_ui"].as<bool>();
     options_.with_2dvisualization_ = yaml["system"]["with_2dui"].as<bool>();
@@ -47,8 +93,11 @@ bool SlamSystem::Init(const std::string& yaml_path) {
         LOG(INFO) << "slam with 3D UI";
         ui_ = std::make_shared<ui::PangolinWindow>();
         ui_->Init();
-
-        lio_->SetUI(ui_);
+        if (use_lio_sam_) {
+            lio_sam_->SetUI(ui_);
+        } else {
+            lio_->SetUI(ui_);
+        }
     }
 
     if (options_.with_gridmap_) {
@@ -59,7 +108,6 @@ bool SlamSystem::Init(const std::string& yaml_path) {
         g2p5_->Init(yaml_path);
 
         if (options_.with_loop_closing_) {
-            /// 当发生回环时，触发一次重绘
             lc_->SetLoopClosedCB([this]() { g2p5_->RedrawGlobalMap(); });
         }
 
@@ -67,13 +115,7 @@ bool SlamSystem::Init(const std::string& yaml_path) {
             g2p5_->SetMapUpdateCallback([this](g2p5::G2P5MapPtr map) {
                 cv::Mat image = map->ToCV();
                 cv::imshow("map", image);
-
-                if (options_.step_on_kf_) {
-                    cv::waitKey(0);
-
-                } else {
-                    cv::waitKey(10);
-                }
+                cv::waitKey(options_.step_on_kf_ ? 0 : 10);
             });
         }
     }
@@ -92,16 +134,7 @@ bool SlamSystem::Init(const std::string& yaml_path) {
         // qos.best_effort();
 
         imu_sub_ = node_->create_subscription<sensor_msgs::msg::Imu>(
-            imu_topic_, qos, [this](sensor_msgs::msg::Imu::SharedPtr msg) {
-                IMUPtr imu = std::make_shared<IMU>();
-                imu->timestamp = ToSec(msg->header.stamp);
-                imu->linear_acceleration =
-                    Vec3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
-                imu->angular_velocity =
-                    Vec3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
-
-                ProcessIMU(imu);
-            });
+            imu_topic_, qos, [this](sensor_msgs::msg::Imu::SharedPtr msg) { ProcessIMU(msg); });
 
         cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
             cloud_topic_, qos, [this](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
@@ -109,7 +142,7 @@ bool SlamSystem::Init(const std::string& yaml_path) {
             });
 
         livox_sub_ = node_->create_subscription<livox_ros_driver2::msg::CustomMsg>(
-            livox_topic_, qos, [this](livox_ros_driver2::msg::CustomMsg ::SharedPtr cloud) {
+            livox_topic_, qos, [this](livox_ros_driver2::msg::CustomMsg::SharedPtr cloud) {
                 Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
             });
 
@@ -158,23 +191,25 @@ void SlamSystem::SaveMap(const std::string& path) {
         std::filesystem::create_directories(save_path);
     }
 
-    // auto global_map_no_loop = lio_->GetGlobalMap(true);
-    auto global_map = lio_->GetGlobalMap(!options_.with_loop_closing_);
-    // auto global_map_raw = lio_->GetGlobalMap(!options_.with_loop_closing_, false, 0.1);
+    std::vector<Keyframe::Ptr> keyframes = use_lio_sam_ ? lio_sam_->GetAllKeyframes() : lio_->GetAllKeyframes();
+    if (keyframes.empty()) {
+        LOG(WARNING) << "no keyframes, skip map saving";
+        return;
+    }
+
+    auto global_map =
+        use_lio_sam_ ? lio_sam_->GetGlobalMap(!options_.with_loop_closing_) : lio_->GetGlobalMap(!options_.with_loop_closing_);
 
     TiledMap::Options tm_options;
     tm_options.map_path_ = save_path;
 
     TiledMap tm(tm_options);
-    SE3 start_pose = lio_->GetAllKeyframes().front()->GetOptPose();
+    SE3 start_pose = keyframes.front()->GetOptPose();
     tm.ConvertFromFullPCD(global_map, start_pose, save_path);
 
     pcl::io::savePCDFileBinaryCompressed(save_path + "/global.pcd", *global_map);
-    // pcl::io::savePCDFileBinaryCompressed(save_path + "/global_no_loop.pcd", *global_map_no_loop);
-    // pcl::io::savePCDFileBinaryCompressed(save_path + "/global_raw.pcd", *global_map_raw);
 
-    if (options_.with_gridmap_) {
-        /// 存为ROS兼容的模式
+    if (options_.with_gridmap_ && g2p5_) {
         auto map = g2p5_->GetNewestMap()->ToROS();
         const int width = map.info.width;
         const int height = map.info.height;
@@ -201,41 +236,79 @@ void SlamSystem::SaveMap(const std::string& path) {
         std::ofstream yamlFile(save_path + "/map.yaml");
         if (!yamlFile.is_open()) {
             LOG(ERROR) << "failed to write map.yaml";
-            return;  // 文件打开失败
+            return;  // �ļ���ʧ��
         }
 
-        try {
-            YAML::Emitter emitter;
-            emitter << YAML::BeginMap;
-            emitter << YAML::Key << "image" << YAML::Value << "map.pgm";
-            emitter << YAML::Key << "mode" << YAML::Value << "trinary";
-            emitter << YAML::Key << "width" << YAML::Value << map.info.width;
-            emitter << YAML::Key << "height" << YAML::Value << map.info.height;
-            emitter << YAML::Key << "resolution" << YAML::Value << float(0.05);
-            std::vector<double> orig{map.info.origin.position.x, map.info.origin.position.y, 0};
-            emitter << YAML::Key << "origin" << YAML::Value << orig;
-            emitter << YAML::Key << "negate" << YAML::Value << 0;
-            emitter << YAML::Key << "occupied_thresh" << YAML::Value << 0.65;
-            emitter << YAML::Key << "free_thresh" << YAML::Value << 0.25;
+        YAML::Emitter emitter;
+        emitter << YAML::BeginMap;
+        emitter << YAML::Key << "image" << YAML::Value << "map.pgm";
+        emitter << YAML::Key << "mode" << YAML::Value << "trinary";
+        emitter << YAML::Key << "width" << YAML::Value << map.info.width;
+        emitter << YAML::Key << "height" << YAML::Value << map.info.height;
+        emitter << YAML::Key << "resolution" << YAML::Value << float(0.05);
+        std::vector<double> orig{map.info.origin.position.x, map.info.origin.position.y, 0};
+        emitter << YAML::Key << "origin" << YAML::Value << orig;
+        emitter << YAML::Key << "negate" << YAML::Value << 0;
+        emitter << YAML::Key << "occupied_thresh" << YAML::Value << 0.65;
+        emitter << YAML::Key << "free_thresh" << YAML::Value << 0.25;
+        emitter << YAML::EndMap;
 
-            emitter << YAML::EndMap;
-
-            yamlFile << emitter.c_str();
-            yamlFile.close();
-        } catch (...) {
-            yamlFile.close();
-            return;
-        }
+        yamlFile << emitter.c_str();
     }
 
     LOG(INFO) << "map saved";
+}
+
+void SlamSystem::ProcessIMU(const sensor_msgs::msg::Imu::SharedPtr& imu) {
+    if (running_ == false) {
+        return;
+    }
+
+    if (use_lio_sam_) {
+        lio_sam_->ProcessIMU(imu);
+    } else {
+        lio_->ProcessIMU(ConvertRosImu(imu));
+    }
 }
 
 void SlamSystem::ProcessIMU(const lightning::IMUPtr& imu) {
     if (running_ == false) {
         return;
     }
+
+    if (use_lio_sam_) {
+        static bool warned = false;
+        if (!warned) {
+            LOG(WARNING) << "LIO-SAM frontend needs raw sensor_msgs::msg::Imu; converted IMUPtr is ignored";
+            warned = true;
+        }
+        return;
+    }
+
     lio_->ProcessIMU(imu);
+}
+
+void SlamSystem::PublishKeyframeToBackends(const Keyframe::Ptr& kf) {
+    if (kf == cur_kf_) {
+        return;
+    }
+    cur_kf_ = kf;
+
+    if (cur_kf_ == nullptr) {
+        return;
+    }
+
+    if (options_.with_loop_closing_ && lc_) {
+        lc_->AddKF(cur_kf_);
+    }
+
+    if (options_.with_gridmap_ && g2p5_) {
+        g2p5_->PushKeyframe(cur_kf_);
+    }
+
+    if (ui_) {
+        ui_->UpdateKF(cur_kf_);
+    }
 }
 
 void SlamSystem::ProcessLidar(const sensor_msgs::msg::PointCloud2::SharedPtr& cloud) {
@@ -243,31 +316,16 @@ void SlamSystem::ProcessLidar(const sensor_msgs::msg::PointCloud2::SharedPtr& cl
         return;
     }
 
+    if (use_lio_sam_) {
+        lio_sam_->ProcessPointCloud2(cloud);
+        lio_sam_->Run();
+        PublishKeyframeToBackends(lio_sam_->GetKeyframe());
+        return;
+    }
+
     lio_->ProcessPointCloud2(cloud);
     lio_->Run();
-
-    auto kf = lio_->GetKeyframe();
-    if (kf != cur_kf_) {
-        cur_kf_ = kf;
-    } else {
-        return;
-    }
-
-    if (cur_kf_ == nullptr) {
-        return;
-    }
-
-    if (options_.with_loop_closing_) {
-        lc_->AddKF(cur_kf_);
-    }
-
-    if (options_.with_gridmap_) {
-        g2p5_->PushKeyframe(cur_kf_);
-    }
-
-    if (ui_) {
-        ui_->UpdateKF(cur_kf_);
-    }
+    PublishKeyframeToBackends(lio_->GetKeyframe());
 }
 
 void SlamSystem::ProcessLidar(const livox_ros_driver2::msg::CustomMsg::SharedPtr& cloud) {
@@ -275,31 +333,16 @@ void SlamSystem::ProcessLidar(const livox_ros_driver2::msg::CustomMsg::SharedPtr
         return;
     }
 
+    if (use_lio_sam_) {
+        lio_sam_->ProcessPointCloud2(cloud);
+        lio_sam_->Run();
+        PublishKeyframeToBackends(lio_sam_->GetKeyframe());
+        return;
+    }
+
     lio_->ProcessPointCloud2(cloud);
     lio_->Run();
-
-    auto kf = lio_->GetKeyframe();
-    if (kf != cur_kf_) {
-        cur_kf_ = kf;
-    } else {
-        return;
-    }
-
-    if (cur_kf_ == nullptr) {
-        return;
-    }
-
-    if (options_.with_loop_closing_) {
-        lc_->AddKF(cur_kf_);
-    }
-
-    if (options_.with_gridmap_) {
-        g2p5_->PushKeyframe(cur_kf_);
-    }
-
-    if (ui_) {
-        ui_->UpdateKF(cur_kf_);
-    }
+    PublishKeyframeToBackends(lio_->GetKeyframe());
 }
 
 void SlamSystem::Spin() {

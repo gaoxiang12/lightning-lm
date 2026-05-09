@@ -16,8 +16,11 @@ find_package(OpenCV REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(tf2_eigen REQUIRED)
 find_package(rosbag2_cpp REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(visualization_msgs REQUIRED)
+find_package(GTSAM REQUIRED)
 
 # OMP
 find_package(OpenMP)
@@ -43,10 +46,12 @@ include_directories(
         ${Pangolin_INCLUDE_DIRS}
         ${GLEW_INCLUDE_DIRS}
         ${tf2_INCLUDE_DIRS}
+        ${tf2_eigen_INCLUDE_DIRS}
         ${pcl_conversions_INCLUDR_DIRS}
         ${rclcpp_INCLUDE_DIRS}
         ${rosbag2_cpp_INCLUDE_DIRS}
         ${nav_msgs_INCLUDE_DIRS}
+        ${GTSAM_INCLUDE_DIR}
 )
 
 include_directories(
@@ -66,6 +71,7 @@ set(third_party_libs
         glog gflags
         ${yaml-cpp_LIBRARIES}
         ${pcl_conversions_LIBRARIES}
+        gtsam
         tbb
         ${rosbag2_cpp_LIBRARIES}
 )
