@@ -70,11 +70,8 @@ class LioSamMapping {
 
     bool LoadParamsFromYAML(const std::string& yaml_path);
     bool SyncPackages();
-    double EstimateScanEndTime(const sensor_msgs::msg::PointCloud2& cloud_msg, double lidar_begin_time);
-    bool RunImageProjection();
-    bool RunFeatureExtraction();
-    bool RunMapOptimization();
     bool MakeLightningKeyframeIfNeeded();
+    void SyncLightningKeyframePoses();
 
     Options options_;
     rclcpp::NodeOptions node_options_;
@@ -85,8 +82,9 @@ class LioSamMapping {
     std::unique_ptr<::mapOptimization> map_optimization_;
 
     std::mutex mtx_buffer_;
-    std::deque<sensor_msgs::msg::PointCloud2> cloudQueue_;
-    std::deque<sensor_msgs::msg::Imu> imuQueue_;
+    std::deque<sensor_msgs::msg::PointCloud2> lidar_buffer_;
+    std::deque<double> time_buffer_;
+    std::deque<sensor_msgs::msg::Imu> imu_buffer_;
 
     SyncedPackage measures_;
     CloudPtr scan_undistort_{new PointCloudType()};
@@ -95,10 +93,13 @@ class LioSamMapping {
 
     double last_timestamp_imu_ = -1.0;
     double last_timestamp_lidar_ = -1.0;
+    double lidar_begin_time_ = 0.0;
+    double lidar_end_time_ = 0.0;
     double lidar_mean_scantime_ = 0.1;
-    int sync_scan_num_ = 0;
+    bool lidar_pushed_ = false;
     int scan_count_ = 0;
     int imu_count_ = 0;
+    int scan_num_for_mean_ = 0;
     std::string sensor_type_ = "ouster";
 
     std::vector<Keyframe::Ptr> all_keyframes_;

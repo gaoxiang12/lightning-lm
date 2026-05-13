@@ -8,6 +8,20 @@
 #include <cmath>
 #include <unordered_map>
 #include <utility>
+#include <vector>
+#include <deque>
+#include <mutex>
+#include <string>
+#include <limits>
+#include <iomanip>
+#include <array>
+#include <thread>
+#include <fstream>
+#include <ctime>
+#include <cfloat>
+#include <iterator>
+#include <sstream>
+
 #include <rclcpp/rclcpp.hpp>
 
 #include <std_msgs/msg/header.hpp>
@@ -23,22 +37,22 @@
 
 #include <opencv2/opencv.hpp>
 
-#include <pcl/kdtree/kdtree_flann.h>  // pcl include kdtree_flann throws error if PCL_NO_PRECOMPILE
-                                      // is defined before
+#include <pcl/kdtree/kdtree_flann.h>
 
 namespace flann {
 namespace serialization {
+
 template <typename Key, typename Value, typename Hash, typename Eq, typename Alloc>
-struct Serializer<std::unordered_map<Key, Value, Hash, Eq, Alloc>>
-{
+struct Serializer<std::unordered_map<Key, Value, Hash, Eq, Alloc>> {
     template <typename InputArchive>
-    static inline void load(InputArchive& ar, std::unordered_map<Key, Value, Hash, Eq, Alloc>& map)
+    static inline void load(InputArchive& ar,
+                            std::unordered_map<Key, Value, Hash, Eq, Alloc>& map)
     {
         size_t size = 0;
         ar & size;
         map.clear();
-        for (size_t i = 0; i < size; ++i)
-        {
+
+        for (size_t i = 0; i < size; ++i) {
             Key key;
             Value value;
             ar & key;
@@ -48,12 +62,13 @@ struct Serializer<std::unordered_map<Key, Value, Hash, Eq, Alloc>>
     }
 
     template <typename OutputArchive>
-    static inline void save(OutputArchive& ar, const std::unordered_map<Key, Value, Hash, Eq, Alloc>& map)
+    static inline void save(OutputArchive& ar,
+                            const std::unordered_map<Key, Value, Hash, Eq, Alloc>& map)
     {
         size_t size = map.size();
         ar & size;
-        for (const auto& kv : map)
-        {
+
+        for (const auto& kv : map) {
             Key key = kv.first;
             Value value = kv.second;
             ar & key;
@@ -61,18 +76,21 @@ struct Serializer<std::unordered_map<Key, Value, Hash, Eq, Alloc>>
         }
     }
 };
+
 }  // namespace serialization
 }  // namespace flann
 
 #ifndef PCL_NO_PRECOMPILE
 #define PCL_NO_PRECOMPILE
 #endif
+
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/search/impl/search.hpp>
 #include <pcl/range_image/range_image.h>
 #include <pcl/common/common.h>
 #include <pcl/common/transforms.h>
+#include <pcl/common/angles.h>
 #include <pcl/registration/icp.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/filters/filter.h>
@@ -86,27 +104,62 @@ struct Serializer<std::unordered_map<Key, Value, Hash, Eq, Alloc>>
 #include <tf2_eigen/tf2_eigen.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
-#include <vector>
-#include <cmath>
-#include <algorithm>
-#include <queue>
-#include <deque>
-#include <iostream>
-#include <fstream>
-#include <ctime>
-#include <cfloat>
-#include <iterator>
-#include <sstream>
-#include <string>
-#include <limits>
-#include <iomanip>
-#include <array>
-#include <thread>
-#include <mutex>
-
 using namespace std;
 
 typedef pcl::PointXYZI PointType;
+
+/*
+    * A point cloud type that has 6D pose info ([x,y,z,roll,pitch,yaw] intensity is time stamp)
+    */
+struct PointXYZIRPYT
+{
+    PCL_ADD_POINT4D
+    PCL_ADD_INTENSITY;
+    float roll;
+    float pitch;
+    float yaw;
+    double time;
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+} EIGEN_ALIGN16;
+
+POINT_CLOUD_REGISTER_POINT_STRUCT(PointXYZIRPYT,
+                                  (float, x, x) (float, y, y)
+                                  (float, z, z) (float, intensity, intensity)
+                                  (float, roll, roll) (float, pitch, pitch) (float, yaw, yaw)
+                                  (double, time, time))
+
+typedef PointXYZIRPYT PointTypePose;
+
+struct LioSamCloudInfo
+{
+    double timestamp = 0.0;
+
+    bool imu_available = false;
+    float imu_roll_init = 0.0f;
+    float imu_pitch_init = 0.0f;
+    float imu_yaw_init = 0.0f;
+
+    std::vector<int> start_ring_index;
+    std::vector<int> end_ring_index;
+    std::vector<int> point_col_ind;
+    std::vector<float> point_range;
+
+    pcl::PointCloud<PointType>::Ptr cloud_deskewed{new pcl::PointCloud<PointType>()};
+    pcl::PointCloud<PointType>::Ptr cloud_corner{new pcl::PointCloud<PointType>()};
+    pcl::PointCloud<PointType>::Ptr cloud_surface{new pcl::PointCloud<PointType>()};
+};
+
+struct LioSamOdometryState
+{
+    double timestamp = 0.0;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    float roll = 0.0f;
+    float pitch = 0.0f;
+    float yaw = 0.0f;
+    int correction_flag = 0;
+};
 
 enum class SensorType { VELODYNE, OUSTER, LIVOX };
 
@@ -115,13 +168,7 @@ class ParamServer : public rclcpp::Node
 public:
     std::string robot_id;
 
-    //Topics
-    string pointCloudTopic;
-    string imuTopic;
-    string odomTopic;
-    string gpsTopic;
     string lioMode;
-    bool useImuPreintegration;
 
     //Frames
     string lidarFrame;
@@ -129,15 +176,8 @@ public:
     string odometryFrame;
     string mapFrame;
 
-    // GPS Settings
+    // IMU initialization
     bool useImuHeadingInitialization;
-    bool useGpsElevation;
-    float gpsCovThreshold;
-    float poseCovThreshold;
-
-    // Save pcd
-    bool savePCD;
-    string savePCDDirectory;
 
     // Lidar Sensor Configuration
     SensorType sensor = SensorType::OUSTER;
@@ -191,17 +231,11 @@ public:
 
     // Loop closure
     bool  loopClosureEnableFlag;
-    float loopClosureFrequency;
     int   surroundingKeyframeSize;
     float historyKeyframeSearchRadius;
     float historyKeyframeSearchTimeDiff;
     int   historyKeyframeSearchNum;
     float historyKeyframeFitnessScore;
-
-    // global map visualization radius
-    float globalMapVisualizationSearchRadius;
-    float globalMapVisualizationPoseDensity;
-    float globalMapVisualizationLeafSize;
 
     // Mapping robustness
     bool mappingMotionGateEnable;
@@ -225,27 +259,11 @@ public:
     int mappingFallbackIcpMaxSourcePoints;
     int mappingFallbackIcpMaxTargetPoints;
 
-    // IMU preintegration robustness
-    bool imuResetOnOptimizationFailure;
-    int imuPoseFactorSkipMaxConsecutive;
-    float imuPoseFactorSkipMaxTime;
-    float imuFailureVelocityThreshold;
-    float imuFailureBiasThreshold;
-
     ParamServer(std::string node_name, const rclcpp::NodeOptions & options) : Node(node_name, options)
     {
-        declare_parameter("pointCloudTopic", "points");
-        get_parameter("pointCloudTopic", pointCloudTopic);
-        declare_parameter("imuTopic", "imu/data");
-        get_parameter("imuTopic", imuTopic);
-        declare_parameter("odomTopic", "lio_sam/odometry/imu");
-        get_parameter("odomTopic", odomTopic);
-        declare_parameter("gpsTopic", "lio_sam/odometry/gps");
-        get_parameter("gpsTopic", gpsTopic);
         declare_parameter("lioMode", "mapping");
         get_parameter("lioMode", lioMode);
         std::transform(lioMode.begin(), lioMode.end(), lioMode.begin(), ::tolower);
-        useImuPreintegration = lioMode == "localization";
 
         declare_parameter("lidarFrame", "laser_data_frame");
         get_parameter("lidarFrame", lidarFrame);
@@ -258,17 +276,6 @@ public:
 
         declare_parameter("useImuHeadingInitialization", false);
         get_parameter("useImuHeadingInitialization", useImuHeadingInitialization);
-        declare_parameter("useGpsElevation", false);
-        get_parameter("useGpsElevation", useGpsElevation);
-        declare_parameter("gpsCovThreshold", 2.0);
-        get_parameter("gpsCovThreshold", gpsCovThreshold);
-        declare_parameter("poseCovThreshold", 25.0);
-        get_parameter("poseCovThreshold", poseCovThreshold);
-
-        declare_parameter("savePCD", false);
-        get_parameter("savePCD", savePCD);
-        declare_parameter("savePCDDirectory", "/Downloads/LOAM/");
-        get_parameter("savePCDDirectory", savePCDDirectory);
 
         std::string sensorStr;
         declare_parameter("sensor", "ouster");
@@ -378,8 +385,6 @@ public:
 
         declare_parameter("loopClosureEnableFlag", true);
         get_parameter("loopClosureEnableFlag", loopClosureEnableFlag);
-        declare_parameter("loopClosureFrequency", 1.0);
-        get_parameter("loopClosureFrequency", loopClosureFrequency);
         declare_parameter("surroundingKeyframeSize", 50);
         get_parameter("surroundingKeyframeSize", surroundingKeyframeSize);
         declare_parameter("historyKeyframeSearchRadius", 15.0);
@@ -390,13 +395,6 @@ public:
         get_parameter("historyKeyframeSearchNum", historyKeyframeSearchNum);
         declare_parameter("historyKeyframeFitnessScore", 0.3);
         get_parameter("historyKeyframeFitnessScore", historyKeyframeFitnessScore);
-
-        declare_parameter("globalMapVisualizationSearchRadius", 1000.0);
-        get_parameter("globalMapVisualizationSearchRadius", globalMapVisualizationSearchRadius);
-        declare_parameter("globalMapVisualizationPoseDensity", 10.0);
-        get_parameter("globalMapVisualizationPoseDensity", globalMapVisualizationPoseDensity);
-        declare_parameter("globalMapVisualizationLeafSize", 1.0);
-        get_parameter("globalMapVisualizationLeafSize", globalMapVisualizationLeafSize);
 
         declare_parameter("mappingMotionGateEnable", true);
         get_parameter("mappingMotionGateEnable", mappingMotionGateEnable);
@@ -438,17 +436,6 @@ public:
         get_parameter("mappingFallbackIcpMaxSourcePoints", mappingFallbackIcpMaxSourcePoints);
         declare_parameter("mappingFallbackIcpMaxTargetPoints", 30000);
         get_parameter("mappingFallbackIcpMaxTargetPoints", mappingFallbackIcpMaxTargetPoints);
-
-        declare_parameter("imuResetOnOptimizationFailure", true);
-        get_parameter("imuResetOnOptimizationFailure", imuResetOnOptimizationFailure);
-        declare_parameter("imuPoseFactorSkipMaxConsecutive", 20);
-        get_parameter("imuPoseFactorSkipMaxConsecutive", imuPoseFactorSkipMaxConsecutive);
-        declare_parameter("imuPoseFactorSkipMaxTime", 15.0);
-        get_parameter("imuPoseFactorSkipMaxTime", imuPoseFactorSkipMaxTime);
-        declare_parameter("imuFailureVelocityThreshold", 30.0);
-        get_parameter("imuFailureVelocityThreshold", imuFailureVelocityThreshold);
-        declare_parameter("imuFailureBiasThreshold", 1.0);
-        get_parameter("imuFailureBiasThreshold", imuFailureBiasThreshold);
 
         usleep(100);
     }
@@ -519,17 +506,6 @@ public:
     }
 };
 
-
-sensor_msgs::msg::PointCloud2 publishCloud(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr thisPub, pcl::PointCloud<PointType>::Ptr thisCloud, rclcpp::Time thisStamp, std::string thisFrame)
-{
-    sensor_msgs::msg::PointCloud2 tempCloud;
-    pcl::toROSMsg(*thisCloud, tempCloud);
-    tempCloud.header.stamp = thisStamp;
-    tempCloud.header.frame_id = thisFrame;
-    if (thisPub && thisPub->get_subscription_count() != 0)
-        thisPub->publish(tempCloud);
-    return tempCloud;
-}
 
 template<typename T>
 double stamp2Sec(const T& stamp)
@@ -655,3 +631,4 @@ auto qos_lidar = rclcpp::QoS(
     qos_profile_lidar);
 
 #endif
+

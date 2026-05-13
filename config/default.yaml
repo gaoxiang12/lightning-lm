@@ -1,4 +1,4 @@
-# 针对NCLT的配置
+# 针对NCLT的配�?
 common:
   dataset: "nclt"
   lidar_topic: "points_raw"
@@ -12,9 +12,9 @@ fasterlio:
   blind: 0.5                # 盲区，小于盲区距离的不会处理
   time_scale: 1e-3             # 兼容不同数据集的时间单位，仅对Velodyne LiDAR(lidar_type=2)生效
 
-  skip_lidar_num: 0 # 点云的跳帧情况
+  skip_lidar_num: 0 # 点云的跳帧情�?
   point_filter_num: 10 # 点云采样参数
-  max_iteration: 6 # 最大迭代次数
+  max_iteration: 6 # 最大迭代次�?
   filter_size_scan: 0.5 # 对scan进行的降采样
   filter_size_map: 0.5
 
@@ -37,20 +37,20 @@ fasterlio:
 
 
 g2p5:
-  esti_floor: false   # 是否动态估计地面
+  esti_floor: false   # 是否动态估计地�?
   lidar_height: 0.0   # 雷达安装高度
   floor_height: -1.2   # 默认地面高度
   min_th_floor: 0.50  # 距离地面这个高度的障碍物被扫入栅格地图中
   max_th_floor: 1.0  # 距离地面这个高度的障碍物被扫入栅格地图中
-  grid_map_resolution: 0.2 # 栅格地图分辨率
+  grid_map_resolution: 0.2 # 栅格地图分辨�?
 
 system:
-  frontend: "fasterlio" # options: fasterlio, lio_sam
-  with_loop_closing: true # 是否需要回环检测
-  with_ui: true # 是否需要3D UI
-  with_2dui: false # 是否需要2D UI
-  with_g2p5: true # 是否需要栅格地图
-  step_on_kf: false # 是否在关键帧处暂停
+  frontend_type: "faster_lio" # options: faster_lio, lio_sam
+  with_loop_closing: true # 是否需要回环检�?
+  with_ui: true # 是否需�?D UI
+  with_2dui: false # 是否需�?D UI
+  with_g2p5: true # 是否需要栅格地�?
+  step_on_kf: false # 是否在关键帧处暂�?
 
   enable_lidar_loc_skip: false
   enable_lidar_loc_rviz: false
@@ -62,11 +62,11 @@ system:
   pub_tf: true
 
 loop_closing:
-  loop_kf_gap: 20       # 每隔多少个关键帧检查一次
+  loop_kf_gap: 20       # 每隔多少个关键帧检查一�?
   min_id_interval: 20   # 被检查的关键帧ID间隔
   closest_id_th: 50     # 历史关键帧与当前帧的ID间隔
-  max_range: 30.0       # 候选帧的最大距离
-  ndt_score_th: 1.0     # ndt位姿分值
+  max_range: 30.0       # 候选帧的最大距�?
+  ndt_score_th: 1.0     # ndt位姿分�?
   with_height: true
 
 

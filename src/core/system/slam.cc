@@ -1,5 +1,7 @@
 #include "core/system/slam.h"
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <utility>
@@ -23,19 +25,32 @@ namespace {
 
 std::string ReadFrontendName(const YAML::Node& yaml) {
     const YAML::Node system = yaml["system"];
-    if (!system) {
-        return "fasterlio";
+    if (system) {
+        if (system["frontend"]) {
+            return system["frontend"].as<std::string>();
+        }
+        if (system["frontend_type"]) {
+            return system["frontend_type"].as<std::string>();
+        }
+        if (system["lio_frontend"]) {
+            return system["lio_frontend"].as<std::string>();
+        }
     }
-    if (system["frontend"]) {
-        return system["frontend"].as<std::string>();
+    if (yaml["frontend_type"]) {
+        return yaml["frontend_type"].as<std::string>();
     }
-    if (system["frontend_type"]) {
-        return system["frontend_type"].as<std::string>();
+    if (yaml["frontend"]) {
+        return yaml["frontend"].as<std::string>();
     }
-    if (system["lio_frontend"]) {
-        return system["lio_frontend"].as<std::string>();
-    }
-    return "fasterlio";
+    return "faster_lio";
+}
+
+std::string NormalizeFrontendName(std::string frontend) {
+    std::transform(frontend.begin(), frontend.end(), frontend.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    std::replace(frontend.begin(), frontend.end(), '-', '_');
+    return frontend;
 }
 
 IMUPtr ConvertRosImu(const sensor_msgs::msg::Imu::SharedPtr& msg) {
@@ -56,10 +71,14 @@ SlamSystem::SlamSystem(lightning::SlamSystem::Options options) : options_(option
 bool SlamSystem::Init(const std::string& yaml_path) {
     auto yaml = YAML::LoadFile(yaml_path);
 
-    const std::string frontend = ReadFrontendName(yaml);
-    use_lio_sam_ = frontend == "lio_sam" || frontend == "liosam" || frontend == "LIO-SAM";
+    const std::string frontend = NormalizeFrontendName(ReadFrontendName(yaml));
+    use_lio_sam_ = frontend == "lio_sam" || frontend == "liosam";
 
     if (use_lio_sam_) {
+        if (options_.online_mode_) {
+            LOG(ERROR) << "LIO-SAM frontend currently supports offline mapping only";
+            return false;
+        }
         LOG(INFO) << "SLAM frontend: LIO-SAM";
         lio_sam_ = std::make_shared<LioSamMapping>();
         if (!lio_sam_->Init(yaml_path)) {
@@ -80,6 +99,11 @@ bool SlamSystem::Init(const std::string& yaml_path) {
     options_.with_2dvisualization_ = yaml["system"]["with_2dui"].as<bool>();
     options_.with_gridmap_ = yaml["system"]["with_g2p5"].as<bool>();
     options_.step_on_kf_ = yaml["system"]["step_on_kf"].as<bool>();
+
+    if (use_lio_sam_ && options_.with_loop_closing_) {
+        LOG(INFO) << "LIO-SAM uses its own loop closure; disable lightning-lm LoopClosing";
+        options_.with_loop_closing_ = false;
+    }
 
     if (options_.with_loop_closing_) {
         LOG(INFO) << "slam with loop closing";
