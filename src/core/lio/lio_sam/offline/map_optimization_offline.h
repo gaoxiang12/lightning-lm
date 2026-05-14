@@ -88,7 +88,7 @@ public:
 
     double timeLaserInfoCur;
 
-    static constexpr int kMaxConsecutiveMappingFailures = 10;
+    static constexpr int kMaxConsecutiveMappingFailures = 15;
 
     float transformTobeMapped[6];
 
@@ -160,7 +160,7 @@ public:
 
     mapOptimization(const rclcpp::NodeOptions & options) : ParamServer("lio_sam_mapOptimization", options)
     {
-        cout << "------------build version - 20260513-1100 -------------------\n" << endl;
+        cout << "------------build version - 20260514-1431 -------------------\n" << endl;
         ISAM2Params parameters;
         parameters.relinearizeThreshold = 0.1;
         parameters.relinearizeSkip = 1;
