@@ -176,8 +176,6 @@ bool LioSamMapping::LoadParamsFromYAML(const std::string& yaml_path) {
         ReadYamlParam<double>(lio_sam, "mappingProcessInterval", "mappingProcessInterval", overrides);
         ReadYamlParam<double>(lio_sam, "mappingLowSpeedMaxTranslationSpeed",
                               "mappingLowSpeedMaxTranslationSpeed", overrides);
-        ReadYamlParam<double>(lio_sam, "mappingLowSpeedMaxExtrapolationTime",
-                              "mappingLowSpeedMaxExtrapolationTime", overrides);
         ReadYamlParam<double>(lio_sam, "surroundingkeyframeAddingDistThreshold",
                               "surroundingkeyframeAddingDistThreshold", overrides);
         ReadYamlParam<double>(lio_sam, "surroundingkeyframeAddingAngleThreshold",
@@ -196,18 +194,12 @@ bool LioSamMapping::LoadParamsFromYAML(const std::string& yaml_path) {
         ReadYamlParam<bool>(lio_sam, "mappingMotionGateEnable", "mappingMotionGateEnable", overrides);
         ReadYamlParam<bool>(lio_sam, "mappingIcpFallbackEnable", "mappingIcpFallbackEnable", overrides);
         ReadYamlParam<double>(lio_sam, "mappingMotionMaxSpeed", "mappingMotionMaxSpeed", overrides);
-        ReadYamlParam<double>(lio_sam, "mappingMotionMaxAcceleration", "mappingMotionMaxAcceleration", overrides);
         ReadYamlParam<double>(lio_sam, "mappingMotionMaxAngularVelocity", "mappingMotionMaxAngularVelocity",
                               overrides);
-        ReadYamlParam<double>(lio_sam, "mappingMotionMaxAngularAcceleration",
-                              "mappingMotionMaxAngularAcceleration", overrides);
         ReadYamlParam<double>(lio_sam, "mappingMotionMaxCurvature", "mappingMotionMaxCurvature", overrides);
         ReadYamlParam<double>(lio_sam, "mappingMotionMaxRollPitchDeg", "mappingMotionMaxRollPitchDeg", overrides);
         ReadYamlParam<bool>(lio_sam, "mappingFallbackIcpSkipOnBadLmMotion",
                             "mappingFallbackIcpSkipOnBadLmMotion", overrides);
-        ReadYamlParam<double>(lio_sam, "mappingRecoveryMaxPositionError", "mappingRecoveryMaxPositionError",
-                              overrides);
-        ReadYamlParam<double>(lio_sam, "mappingRecoveryMaxYawDeg", "mappingRecoveryMaxYawDeg", overrides);
         ReadYamlParam<double>(lio_sam, "mappingFallbackIcpMaxCorrespondenceDistance",
                               "mappingFallbackIcpMaxCorrespondenceDistance", overrides);
         ReadYamlParam<int>(lio_sam, "mappingFallbackIcpMaxIterations", "mappingFallbackIcpMaxIterations",

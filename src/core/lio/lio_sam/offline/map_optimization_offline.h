@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 
 using namespace gtsam;
@@ -40,8 +41,6 @@ public:
 
     LioSamCloudInfo cloudInfo;
     bool createdNewKeyframe = false;
-    bool hasLatestLaserOdometryIncremental = false;
-    LioSamOdometryState latestLaserOdometryIncremental;
 
     vector<pcl::PointCloud<PointType>::Ptr> cornerCloudKeyFrames;
     vector<pcl::PointCloud<PointType>::Ptr> surfCloudKeyFrames;
@@ -89,6 +88,8 @@ public:
 
     double timeLaserInfoCur;
 
+    static constexpr int kMaxConsecutiveMappingFailures = 10;
+
     float transformTobeMapped[6];
 
     std::mutex mtx;
@@ -100,34 +101,26 @@ public:
     {
         bool initialized = false;
         bool continuous = true;
-        bool predictedReference = false;
         bool badSpeed = false;
-        bool badAcceleration = false;
         bool badAngularVelocity = false;
-        bool badAngularAcceleration = false;
         bool badCurvature = false;
-        bool badPositionInnovation = false;
-        bool badYawInnovation = false;
         bool badRollPitch = false;
         bool badFinite = false;
         double dt = 0.0;
         double ds = 0.0;
         double speed = 0.0;
-        double acceleration = 0.0;
         double rollDeg = 0.0;
         double pitchDeg = 0.0;
         double angleDeg = 0.0;
         double yawDeg = 0.0;
         double omega = 0.0;
-        double alpha = 0.0;
         double curvature = 0.0;
     };
 
     enum class MappingTrackingState
     {
         TRACKING,
-        LOST,
-        RECOVERY_CANDIDATE
+        LOST
     };
 
     bool mappingPoseReliable = true;
@@ -136,26 +129,18 @@ public:
     MappingTrackingState mappingTrackingState = MappingTrackingState::TRACKING;
     int mappingFailureCount = 0;
     double mappingFirstFailureTime = -1.0;
-    bool motionGateHasLast = false;
-    double motionGateLastTime = -1.0;
-    double motionGateLastSpeed = 0.0;
-    double motionGateLastOmega = 0.0;
-    float motionGateLastTransform[6] = {0, 0, 0, 0, 0, 0};
     bool lowSpeedGuessHasPrevTrusted = false;
     bool lowSpeedGuessHasLastTrusted = false;
     double lowSpeedGuessPrevTrustedTime = -1.0;
     double lowSpeedGuessLastTrustedTime = -1.0;
     float lowSpeedGuessPrevTrustedTransform[6] = {0, 0, 0, 0, 0, 0};
     float lowSpeedGuessLastTrustedTransform[6] = {0, 0, 0, 0, 0, 0};
-    bool hasLastTrustedMappingTransform = false;
-    float lastTrustedMappingTransform[6] = {0, 0, 0, 0, 0, 0};
-    bool mappingPredictedPoseAvailable = false;
-    double mappingPredictedPoseTime = -1.0;
-    float mappingPredictedTransform[6] = {0, 0, 0, 0, 0, 0};
-    bool pendingRecoveryAvailable = false;
-    double pendingRecoveryTime = -1.0;
-    float pendingRecoveryTransform[6] = {0, 0, 0, 0, 0, 0};
-    std::string pendingRecoverySource = "NONE";
+    bool hasLastAcceptedTrackingTransform = false;
+    double lastAcceptedTrackingTransformTime = -1.0;
+    float lastAcceptedTrackingTransform[6] = {0, 0, 0, 0, 0, 0};
+    bool lastAcceptedImuTransformAvailable = false;
+    float lastAcceptedImuTransform[6] = {0, 0, 0, 0, 0, 0};
+    float frameInitialGuessTransform[6] = {0, 0, 0, 0, 0, 0};
     int lastLMCloudSelNum = 0;
     int lastLMIterationCount = 0;
     bool lastLMRan = false;
@@ -172,8 +157,6 @@ public:
     vector<gtsam::noiseModel::Diagonal::shared_ptr> loopNoiseQueue;
 
     Eigen::Affine3f transPointAssociateToMap;
-    Eigen::Affine3f incrementalOdometryAffineFront;
-    Eigen::Affine3f incrementalOdometryAffineBack;
 
     mapOptimization(const rclcpp::NodeOptions & options) : ParamServer("lio_sam_mapOptimization", options)
     {
@@ -240,7 +223,6 @@ public:
     bool Run(LioSamCloudInfo& msgIn)
     {
         createdNewKeyframe = false;
-        hasLatestLaserOdometryIncremental = false;
 
         // extract time stamp
         timeLaserInfoCur = msgIn.timestamp;
@@ -275,7 +257,7 @@ public:
 
             updateOdometryState();
 
-            int keyframeAllowed =int(mappingPoseReliable && !isDegenerate && transformIsFinite(transformTobeMapped));
+            int keyframeAllowed =int(mappingPoseReliable  && transformIsFinite(transformTobeMapped));
             
             RCLCPP_WARN(get_logger(),
                 "[T2M] time=%.6f roll=%.3f pitch=%.3f yaw=%.3f "
@@ -374,7 +356,7 @@ public:
         return pcl::getTransformation(thisPoint.x, thisPoint.y, thisPoint.z, thisPoint.roll, thisPoint.pitch, thisPoint.yaw);
     }
 
-    Eigen::Affine3f trans2Affine3f(float transformIn[])
+    Eigen::Affine3f trans2Affine3f(const float transformIn[6])
     {
         return pcl::getTransformation(transformIn[3], transformIn[4], transformIn[5], transformIn[0], transformIn[1], transformIn[2]);
     }
@@ -411,8 +393,6 @@ public:
     {
         if (mappingTrackingState == MappingTrackingState::LOST)
             return "LOST";
-        if (mappingTrackingState == MappingTrackingState::RECOVERY_CANDIDATE)
-            return "RECOVERY_CANDIDATE";
         return "TRACKING";
     }
 
@@ -437,16 +417,6 @@ public:
         result.angleDeg = angleRad * 180.0 / M_PI;
         result.yawDeg = std::fabs(dyaw) * 180.0 / M_PI;
         result.curvature = result.ds > 1e-3 ? std::fabs(dyaw) / result.ds : 0.0;
-    }
-
-    void syncMappingPrediction(const float acceptedTransform[6])
-    {
-        if (!transformIsFinite(acceptedTransform))
-            return;
-
-        copyTransform(acceptedTransform, mappingPredictedTransform);
-        mappingPredictedPoseTime = timeLaserInfoCur;
-        mappingPredictedPoseAvailable = true;
     }
 
     bool estimateLowSpeedVelocity(double& vx, double& vy, double& vz)
@@ -491,39 +461,24 @@ public:
     bool acceptMappingPose(const std::string& source)
     {
 
-        const bool recovering = mappingTrackingState != MappingTrackingState::TRACKING;
         mappingPoseReliable = true;
         lidarCorrectionFlag = 0;
         mappingPoseSource = source;
         mappingFailureCount = 0;
         mappingFirstFailureTime = -1.0;
-        pendingRecoveryAvailable = false;
-        pendingRecoverySource = "NONE";
         mappingTrackingState = MappingTrackingState::TRACKING;
-
-        if (recovering)
-        {
-            motionGateHasLast = false;
-            motionGateLastSpeed = 0.0;
-            motionGateLastOmega = 0.0;
-        }
 
         return true;
     }
 
-    void rejectMappingPose(const float fallbackTransform[6], const std::string& source)
+    void rejectMappingPose(const std::string& source)
     {
-        const bool keepPendingRecovery =
-            source.find("RECOVERY_PENDING") != std::string::npos;
-        if (!keepPendingRecovery)
-        {
-            mappingTrackingState = MappingTrackingState::LOST;
-            pendingRecoveryAvailable = false;
-            pendingRecoverySource = "NONE";
-        }
+        mappingTrackingState = MappingTrackingState::LOST;
 
-        copyTransform(fallbackTransform, transformTobeMapped);
-        incrementalOdometryAffineBack = trans2Affine3f(transformTobeMapped);
+        if (hasLastAcceptedTrackingTransform && transformIsFinite(lastAcceptedTrackingTransform))
+            copyTransform(lastAcceptedTrackingTransform, transformTobeMapped);
+        else
+            copyTransform(frameInitialGuessTransform, transformTobeMapped);
 
         mappingPoseReliable = false;
         lidarCorrectionFlag = 2;
@@ -532,14 +487,30 @@ public:
         if (mappingFailureCount == 0)
             mappingFirstFailureTime = timeLaserInfoCur;
         mappingFailureCount++;
+        const double failedDuration =
+            mappingFirstFailureTime >= 0.0 ? timeLaserInfoCur - mappingFirstFailureTime : 0.0;
 
         RCLCPP_WARN(get_logger(),
             "[MAPPING_FAIL] state=%s source=%s failedCount=%d failedDuration=%.3f. "
-            "Use last reliable pose only; do not add keyframe or LiDAR pose factor.",
+            "Reject current frame. Restore transformTobeMapped to lastAcceptedTrackingTransform if available, "
+            "otherwise restore frameInitialGuessTransform. No keyframe/factor will be saved.",            
             trackingStateName(),
             mappingPoseSource.c_str(),
             mappingFailureCount,
-            mappingFirstFailureTime >= 0.0 ? timeLaserInfoCur - mappingFirstFailureTime : 0.0);
+            failedDuration);
+
+        if (mappingFailureCount > kMaxConsecutiveMappingFailures)
+        {
+            RCLCPP_FATAL(get_logger(),
+                "[MAPPING_FATAL] continuous bad frames %d > %d, duration=%.3f s. "
+                "Offline mapping stops because the pose chain is no longer reliable. lastSource=%s",
+                mappingFailureCount,
+                kMaxConsecutiveMappingFailures,
+                failedDuration,
+                source.c_str());
+            rclcpp::shutdown();
+            std::exit(EXIT_FAILURE);
+        }
     }
 
     MotionGateResult evaluateMotionGate(const float candidateTransform[6])
@@ -556,72 +527,11 @@ public:
         if (!mappingMotionGateEnable)
             return result;
 
-        const bool usePredictedReference =
-            mappingTrackingState != MappingTrackingState::TRACKING &&
-            mappingPredictedPoseAvailable &&
-            transformIsFinite(mappingPredictedTransform);
-
-        if (usePredictedReference)
-        {
-            result.initialized = true;
-            result.predictedReference = true;
-
-            // time since the last accepted tracking reference.
-            // In LOST/RECOVERY this can be large; do not use it for velocity here,
-            // but use it to relax the allowed prediction innovation.
-            result.dt = motionGateHasLast ? timeLaserInfoCur - motionGateLastTime : 0.0;
-            if (!std::isfinite(result.dt) || result.dt < 0.0)
-                result.dt = 0.0;
-
-            fillMotionDeltaMetrics(mappingPredictedTransform, candidateTransform, result);
-
-            // Base position innovation gate.
-            double maxPositionInnovation = mappingRecoveryMaxPositionError;
-
-            // LOST/RECOVERY 状态下，prediction 只靠 IMU 旋转 + 低速外推，
-            // 时间越久，平移预测误差越可能累积。
-            // 所以这里允许 position innovation 随丢失时间适度放宽。
-            if (mappingTrackingState != MappingTrackingState::TRACKING)
-            {
-                // TODO: 后面建议做成 yaml 参数
-                const double recoveryDriftSpeed = 0.10;  // m/s
-                const double recoveryExtraMax   = 2.5;   // m
-
-                const double extraAllowance =
-                    std::min(recoveryExtraMax, recoveryDriftSpeed * result.dt);
-
-                maxPositionInnovation += extraAllowance;
-            }
-
-            result.badPositionInnovation =
-                maxPositionInnovation > 0.0 &&
-                result.ds > maxPositionInnovation;
-
-            // yaw 仍然用固定阈值，不随 LOST 时间放宽太多；
-            // 否则很容易把错误朝向的 LM 解放进 recovery。
-            result.badYawInnovation =
-                mappingRecoveryMaxYawDeg > 0.0 &&
-                result.yawDeg > mappingRecoveryMaxYawDeg;
-
-            // roll/pitch 对地面车仍然是硬约束。
-            result.badRollPitch =
-                mappingMotionMaxRollPitchDeg > 0.0 &&
-                (result.rollDeg > mappingMotionMaxRollPitchDeg ||
-                result.pitchDeg > mappingMotionMaxRollPitchDeg);
-
-            result.continuous = !(result.badPositionInnovation ||
-                                result.badYawInnovation ||
-                                result.badRollPitch ||
-                                result.badFinite);
-
-            return result;
-        }
-
-        if (!motionGateHasLast)
+        if (!hasLastAcceptedTrackingTransform || !transformIsFinite(lastAcceptedTrackingTransform))
             return result;
 
         result.initialized = true;
-        result.dt = timeLaserInfoCur - motionGateLastTime;
+        result.dt = timeLaserInfoCur - lastAcceptedTrackingTransformTime;
         if (!std::isfinite(result.dt) || result.dt <= 1e-3)
         {
             result.badFinite = true;
@@ -629,28 +539,18 @@ public:
             return result;
         }
 
-        fillMotionDeltaMetrics(motionGateLastTransform, candidateTransform, result);
+        fillMotionDeltaMetrics(lastAcceptedTrackingTransform, candidateTransform, result);
 
         result.speed = result.ds / result.dt;
-        result.acceleration = std::fabs(result.speed - motionGateLastSpeed) / result.dt;
         result.omega = result.angleDeg / result.dt;
-        result.alpha = std::fabs(result.omega - motionGateLastOmega) / result.dt;
 
         result.badSpeed =
             mappingMotionMaxSpeed > 0.0 &&
             result.speed > mappingMotionMaxSpeed;
 
-        result.badAcceleration =
-            mappingMotionMaxAcceleration > 0.0 &&
-            result.acceleration > mappingMotionMaxAcceleration;
-
         result.badAngularVelocity =
             mappingMotionMaxAngularVelocity > 0.0 &&
             result.omega > mappingMotionMaxAngularVelocity;
-
-        result.badAngularAcceleration =
-            mappingMotionMaxAngularAcceleration > 0.0 &&
-            result.alpha > mappingMotionMaxAngularAcceleration;
 
         result.badCurvature =
             mappingMotionMaxCurvature > 0.0 &&
@@ -663,12 +563,8 @@ public:
             result.pitchDeg > mappingMotionMaxRollPitchDeg);
 
         result.continuous = !(result.badSpeed ||
-                            result.badAcceleration ||
                             result.badAngularVelocity ||
-                            result.badAngularAcceleration ||
                             result.badCurvature ||
-                            result.badPositionInnovation ||
-                            result.badYawInnovation ||
                             result.badRollPitch ||
                             result.badFinite);
 
@@ -681,56 +577,66 @@ public:
             return;
 
         RCLCPP_WARN(get_logger(),
-            "[MOTION_GATE][%s] ok=%d state=%s ref=%s dt=%.3f ds=%.3f drp=(%.2f %.2f)deg dyaw=%.2fdeg "
-            "v=%.3f(prev=%.3f,a=%.3f) omega=%.2f(prev=%.2f,alpha=%.2f) "
-            "kappa=%.3f bad(speed=%d accel=%d omega=%d alpha=%d kappa=%d posInnov=%d yawInnov=%d rollpitch=%d finite=%d)",
+            "[MOTION_GATE][%s] ok=%d state=%s ref=LAST_ACCEPTED_TRACKING dt=%.3f ds=%.3f "
+            "drp=(%.2f %.2f)deg dyaw=%.2fdeg v=%.3f omega=%.2f kappa=%.3f "
+            "bad(speed=%d omega=%d kappa=%d rollpitch=%d finite=%d)",
             source.c_str(),
             int(motion.continuous),
             trackingStateName(),
-            motion.predictedReference ? "PREDICTED" : "TRUSTED",
             motion.dt,
             motion.ds,
             motion.rollDeg,
             motion.pitchDeg,
             motion.yawDeg,
             motion.speed,
-            motionGateLastSpeed,
-            motion.acceleration,
             motion.omega,
-            motionGateLastOmega,
-            motion.alpha,
             motion.curvature,
             int(motion.badSpeed),
-            int(motion.badAcceleration),
             int(motion.badAngularVelocity),
-            int(motion.badAngularAcceleration),
             int(motion.badCurvature),
-            int(motion.badPositionInnovation),
-            int(motion.badYawInnovation),
             int(motion.badRollPitch),
             int(motion.badFinite));
     }
-
-    void commitMotionGateReference(const float acceptedTransform[6])
+    void commitLastAcceptedTrackingTransform(const float acceptedTransform[6],
+                                         const std::string& source)
     {
         if (!transformIsFinite(acceptedTransform))
             return;
 
-        MotionGateResult motion = evaluateMotionGate(acceptedTransform);
-        if (motion.initialized)
+        copyTransform(acceptedTransform, lastAcceptedTrackingTransform);
+        lastAcceptedTrackingTransformTime = timeLaserInfoCur;
+        hasLastAcceptedTrackingTransform = true;
+
+        // 低速模型也应该基于最新 accepted tracking pose 更新
+        commitLowSpeedTrustedPose(lastAcceptedTrackingTransform);
+
+        if (cloudInfo.imu_available)
         {
-            motionGateLastSpeed = motion.speed;
-            motionGateLastOmega = motion.omega;
+            lastAcceptedImuTransform[0] = cloudInfo.imu_roll_init;
+            lastAcceptedImuTransform[1] = cloudInfo.imu_pitch_init;
+            lastAcceptedImuTransform[2] = cloudInfo.imu_yaw_init;
+            lastAcceptedImuTransform[3] = 0.0f;
+            lastAcceptedImuTransform[4] = 0.0f;
+            lastAcceptedImuTransform[5] = 0.0f;
+            lastAcceptedImuTransformAvailable =
+                transformIsFinite(lastAcceptedImuTransform);
         }
         else
         {
-            motionGateLastSpeed = 0.0;
-            motionGateLastOmega = 0.0;
+            lastAcceptedImuTransformAvailable = false;
         }
 
-        copyTransform(acceptedTransform, motionGateLastTransform);
-        motionGateLastTime = timeLaserInfoCur;
-        motionGateHasLast = true;
+        RCLCPP_WARN(get_logger(),
+            "[TRACKING_ACCEPTED_UPDATE] source=%s time=%.6f "
+            "roll=%.3f pitch=%.3f yaw=%.3f x=%.3f y=%.3f z=%.3f",
+            source.c_str(),
+            timeLaserInfoCur,
+            acceptedTransform[0] * 180.0 / M_PI,
+            acceptedTransform[1] * 180.0 / M_PI,
+            acceptedTransform[2] * 180.0 / M_PI,
+            acceptedTransform[3],
+            acceptedTransform[4],
+            acceptedTransform[5]);
     }
 
     void commitLowSpeedTrustedPose(const float acceptedTransform[6])
@@ -750,141 +656,12 @@ public:
         lowSpeedGuessHasLastTrusted = true;
     }
 
-    void advanceMappingPrediction(bool hasImuRotationIncrement, const Eigen::Affine3f& imuRotationIncrement)
-    {
-        if (!mappingPredictedPoseAvailable)
-        {
-            if (hasLastTrustedMappingTransform)
-                copyTransform(lastTrustedMappingTransform, mappingPredictedTransform);
-            else
-                copyTransform(transformTobeMapped, mappingPredictedTransform);
-            mappingPredictedPoseTime = timeLaserInfoCur;
-            mappingPredictedPoseAvailable = true;
-        }
-
-        Eigen::Affine3f predictedAffine = trans2Affine3f(mappingPredictedTransform);
-        if (hasImuRotationIncrement)
-            predictedAffine = predictedAffine * imuRotationIncrement;
-
-        pcl::getTranslationAndEulerAngles(predictedAffine,
-            mappingPredictedTransform[3], mappingPredictedTransform[4], mappingPredictedTransform[5],
-            mappingPredictedTransform[0], mappingPredictedTransform[1], mappingPredictedTransform[2]);
-
-        const double dtRaw = timeLaserInfoCur - mappingPredictedPoseTime;
-        if (std::isfinite(dtRaw) && dtRaw > 0.0)
-        {
-            double dt = dtRaw;
-            if (mappingTrackingState == MappingTrackingState::TRACKING)
-            {
-                if (mappingLowSpeedMaxExtrapolationTime > 0.0)
-                    dt = std::min(dt, static_cast<double>(mappingLowSpeedMaxExtrapolationTime));
-            }
-            else
-            {
-                // LOST / RECOVERY 时允许预测追上时间跨度
-                const double lostMaxExtrapolationTime = 30.0;  // 先写死，后面做参数
-                dt = std::min(dt, lostMaxExtrapolationTime);
-            }
-
-            double vx, vy, vz;
-            if (estimateLowSpeedVelocity(vx, vy, vz))
-            {
-                mappingPredictedTransform[3] += vx * dt;
-                mappingPredictedTransform[4] += vy * dt;
-                mappingPredictedTransform[5] += vz * dt;
-            }
-        }
-
-        mappingPredictedPoseTime = timeLaserInfoCur;
-        copyTransform(mappingPredictedTransform, transformTobeMapped);
-    }
-
-    bool pendingRecoveryMotionConsistent(const float candidateTransform[6])
-    {
-        if (!pendingRecoveryAvailable || !transformIsFinite(candidateTransform))
-            return false;
-
-        const double dt = timeLaserInfoCur - pendingRecoveryTime;
-        if (!std::isfinite(dt) || dt <= 1e-3)
-            return false;
-
-        MotionGateResult motion;
-        fillMotionDeltaMetrics(pendingRecoveryTransform, candidateTransform, motion);
-
-        const double maxDs =
-            std::max(0.0f, mappingLowSpeedMaxTranslationSpeed) * dt +
-            std::max(0.0f, mappingRecoveryMaxPositionError);
-        const double maxYaw = mappingRecoveryMaxYawDeg;
-
-        const bool badDs = maxDs > 0.0 && motion.ds > maxDs;
-        const bool badYaw = maxYaw > 0.0 && motion.yawDeg > maxYaw;
-        const bool badRollPitch = mappingMotionMaxRollPitchDeg > 0.0 &&
-                                  (motion.rollDeg > mappingMotionMaxRollPitchDeg ||
-                                   motion.pitchDeg > mappingMotionMaxRollPitchDeg);
-
-        RCLCPP_WARN(get_logger(),
-            "[RECOVERY][CHECK] pending=%s dt=%.3f ds=%.3f/%.3f dyaw=%.2f/%.2f "
-            "drp=(%.2f %.2f) bad(ds=%d yaw=%d rollpitch=%d)",
-            pendingRecoverySource.c_str(),
-            dt,
-            motion.ds,
-            maxDs,
-            motion.yawDeg,
-            maxYaw,
-            motion.rollDeg,
-            motion.pitchDeg,
-            int(badDs),
-            int(badYaw),
-            int(badRollPitch));
-
-        return !(badDs || badYaw || badRollPitch);
-    }
-
-    bool acceptOrStageMappingCandidate(const std::string& source,
-                                       const float candidateTransform[6],
-                                       const float fallbackTransform[6])
-    {
-
-        if (mappingTrackingState == MappingTrackingState::TRACKING)
-        { 
-            return acceptMappingPose(source);
-        }
-
-        if (mappingTrackingState == MappingTrackingState::RECOVERY_CANDIDATE &&
-            pendingRecoveryMotionConsistent(candidateTransform))
-        {
-            RCLCPP_WARN(get_logger(),
-                "[RECOVERY][ACCEPT] source=%s confirmed by two consecutive candidates.",
-                source.c_str());
-            return acceptMappingPose(source);
-        }
-
-        copyTransform(candidateTransform, pendingRecoveryTransform);
-        pendingRecoveryTime = timeLaserInfoCur;
-        pendingRecoverySource = source;
-        pendingRecoveryAvailable = true;
-        mappingTrackingState = MappingTrackingState::RECOVERY_CANDIDATE;
-
-        RCLCPP_WARN(get_logger(),
-            "[RECOVERY][PENDING] source=%s accepted as first recovery candidate only. "
-            "Wait one more consistent candidate before adding keyframe.",
-            source.c_str());
-        rejectMappingPose(fallbackTransform, "RECOVERY_PENDING_" + source);
-        return false;
-    }
-
     bool runIcpFallback(const float initialGuess[6], float resultTransform[6],
                         double& fitnessScore, int& sourceSize, int& targetSize)
     {
         fitnessScore = std::numeric_limits<double>::infinity();
         sourceSize = 0;
         targetSize = 0;
-
-        if (!mappingIcpFallbackEnable)
-        {
-            RCLCPP_WARN(get_logger(), "[ICP][SKIP] fallback disabled by mappingIcpFallbackEnable=false.");
-            return false;
-        }
 
         pcl::PointCloud<PointType>::Ptr sourceCloud(new pcl::PointCloud<PointType>());
         pcl::PointCloud<PointType>::Ptr targetCloud(new pcl::PointCloud<PointType>());
@@ -1135,12 +912,6 @@ public:
 
     void updateInitialGuess()
     {
-        // save current transformation before any processing
-        incrementalOdometryAffineFront = trans2Affine3f(transformTobeMapped);
-
-        static Eigen::Affine3f lastImuTransformation;
-        static bool lastImuTransformationAvailable = false;
-        // initialization
         if (cloudKeyPoses3D->points.empty())
         {
             transformTobeMapped[0] = cloudInfo.imu_roll_init;
@@ -1150,29 +921,49 @@ public:
             if (!useImuHeadingInitialization)
                 transformTobeMapped[2] = 0;
 
-            lastImuTransformation = pcl::getTransformation(0, 0, 0, cloudInfo.imu_roll_init, cloudInfo.imu_pitch_init, cloudInfo.imu_yaw_init); // save imu before return;
-            lastImuTransformationAvailable = true;
-            syncMappingPrediction(transformTobeMapped);
+            copyTransform(transformTobeMapped, frameInitialGuessTransform);
             return;
         }
 
-        Eigen::Affine3f imuRotationIncrement;
-        bool hasImuRotationIncrement = false;
-        if (cloudInfo.imu_available == true)
+        if (hasLastAcceptedTrackingTransform && transformIsFinite(lastAcceptedTrackingTransform))
         {
-            Eigen::Affine3f transBack = pcl::getTransformation(0, 0, 0, cloudInfo.imu_roll_init, cloudInfo.imu_pitch_init, cloudInfo.imu_yaw_init);
-            if (lastImuTransformationAvailable)
+            Eigen::Affine3f initialGuessAffine = trans2Affine3f(lastAcceptedTrackingTransform);
+
+            if (cloudInfo.imu_available && lastAcceptedImuTransformAvailable)
             {
-                imuRotationIncrement = lastImuTransformation.inverse() * transBack;
-                hasImuRotationIncrement = true;
+                Eigen::Affine3f acceptedImuAffine  = trans2Affine3f(lastAcceptedImuTransform);
+                Eigen::Affine3f currentImuAffine = pcl::getTransformation(
+                    0.0f, 0.0f, 0.0f,
+                    cloudInfo.imu_roll_init, cloudInfo.imu_pitch_init, cloudInfo.imu_yaw_init);
+                initialGuessAffine = initialGuessAffine * acceptedImuAffine .inverse() * currentImuAffine;
             }
 
-            lastImuTransformation = transBack;
-            lastImuTransformationAvailable = true;
+            pcl::getTranslationAndEulerAngles(initialGuessAffine,
+                transformTobeMapped[3], transformTobeMapped[4], transformTobeMapped[5],
+                transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);
+
+            const double dtAccepted  = timeLaserInfoCur - lastAcceptedTrackingTransformTime;
+            if (std::isfinite(dtAccepted ) && dtAccepted  > 0.0)
+            {
+                double vx, vy, vz;
+                if (estimateLowSpeedVelocity(vx, vy, vz))
+                {
+                    transformTobeMapped[3] += vx * dtAccepted ;
+                    transformTobeMapped[4] += vy * dtAccepted ;
+                    transformTobeMapped[5] += vz * dtAccepted ;
+                }
+            }
+
+            copyTransform(transformTobeMapped, frameInitialGuessTransform);
+            return;
         }
 
-        advanceMappingPrediction(hasImuRotationIncrement, imuRotationIncrement);
-        return;
+        if (!transformIsFinite(transformTobeMapped))
+        {
+            for (int i = 0; i < 6; ++i)
+                transformTobeMapped[i] = 0.0f;
+        }
+        copyTransform(transformTobeMapped, frameInitialGuessTransform);
     }
 
     void extractNearby()
@@ -1626,29 +1417,32 @@ public:
 
     void scan2MapOptimization()
     {
-        float initialGuessTransform[6];
-        copyTransform(transformTobeMapped, initialGuessTransform);
+        // 1. 冻结当前帧初值
+        copyTransform(transformTobeMapped, frameInitialGuessTransform);
 
-        float keepaliveTransform[6];
-        if (hasLastTrustedMappingTransform)
-            copyTransform(lastTrustedMappingTransform, keepaliveTransform);
-        else
-            copyTransform(initialGuessTransform, keepaliveTransform);
-
+        // 2. 第一帧直接接受
         if (cloudKeyPoses3D->points.empty())
         {
             acceptMappingPose("INIT");
             return;
         }
 
-        bool lmUsable = false;
-        bool lmMotionOk = true;
-        if (laserCloudCornerLastDSNum > edgeFeatureMinValidNum && laserCloudSurfLastDSNum > surfFeatureMinValidNum)
+        bool lmRan = false;
+        bool lmConverged = false;
+        bool lmFinite = false;
+        bool lmMotionOk = false;
+        std::string lmFailReason = "UNKNOWN";
+
+        // 3. 尝试 LM
+        if (laserCloudCornerLastDSNum > edgeFeatureMinValidNum &&
+            laserCloudSurfLastDSNum > surfFeatureMinValidNum)
         {
             kdtreeCornerFromMap->setInputCloud(laserCloudCornerFromMapDS);
             kdtreeSurfFromMap->setInputCloud(laserCloudSurfFromMapDS);
 
+            lmRan = true;
             lastLMRan = true;
+
             for (int iterCount = 0; iterCount < 30; iterCount++)
             {
                 laserCloudOri->clear();
@@ -1656,94 +1450,161 @@ public:
 
                 cornerOptimization();
                 surfOptimization();
-
                 combineOptimizationCoeffs();
 
                 if (LMOptimization(iterCount) == true)
                 {
+                    lmConverged = true;
                     lastLMConverged = true;
                     lastLMIterationCount = iterCount + 1;
-                    break;              
+                    break;
                 }
 
                 lastLMIterationCount = iterCount + 1;
             }
 
             transformUpdate();
-            MotionGateResult lmMotion = evaluateMotionGate(transformTobeMapped);
-            logMotionGate("LM", lmMotion);
-            lmMotionOk = lmMotion.continuous;
-            lmUsable = lastLMConverged && lmMotion.continuous && transformIsFinite(transformTobeMapped);
 
-            if (lmUsable)
+            lmFinite = transformIsFinite(transformTobeMapped);
+
+            MotionGateResult lmMotion;
+            if (lmFinite)
             {
-                acceptOrStageMappingCandidate("LM", transformTobeMapped, keepaliveTransform);
+                lmMotion = evaluateMotionGate(transformTobeMapped);
+                logMotionGate("LM", lmMotion);
+                lmMotionOk = lmMotion.continuous;
+            }
+
+            if (lmConverged && lmFinite && lmMotionOk)
+            {
+                acceptMappingPose("LM");
                 return;
             }
-        } else {
-            RCLCPP_WARN(get_logger(), "Not enough features! Only %d edge and %d planar features available.", laserCloudCornerLastDSNum, laserCloudSurfLastDSNum);
+
+            if (!lmConverged)
+                lmFailReason = "FAIL_LM_NOT_CONVERGED";
+            else if (!lmFinite)
+                lmFailReason = "FAIL_LM_NOT_FINITE";
+            else if (!lmMotionOk)
+                lmFailReason = "FAIL_LM_MOTION";
+            else
+                lmFailReason = "FAIL_LM_UNKNOWN";
+        }
+        else
+        {
+            lmFailReason = "FAIL_NOT_ENOUGH_FEATURES";
+
+            RCLCPP_WARN(get_logger(),
+                "[LM][SKIP] not enough features. corner=%d surf=%d minCorner=%d minSurf=%d",
+                laserCloudCornerLastDSNum,
+                laserCloudSurfLastDSNum,
+                edgeFeatureMinValidNum,
+                surfFeatureMinValidNum);
         }
 
+        // 4. LM 已失败。先恢复当前帧初值，避免 LM 失败结果污染后续流程。
+        copyTransform(frameInitialGuessTransform, transformTobeMapped);
+
         RCLCPP_WARN(get_logger(),
-            "[LM][SUSPECT] ran=%d converged=%d degenerate=%d coeff=%d iter=%d motionOK=%d. Evaluate ICP fallback.",
-            int(lastLMRan),
-            int(lastLMConverged),
-            int(isDegenerate),
+            "[LM][FAIL] reason=%s ran=%d converged=%d finite=%d motionOK=%d "
+            "coeff=%d iter=%d icpFallbackEnable=%d. Restore frameInitialGuess.",
+            lmFailReason.c_str(),
+            int(lmRan),
+            int(lmConverged),
+            int(lmFinite),
+            int(lmMotionOk),
             lastLMCloudSelNum,
             lastLMIterationCount,
-            int(lmMotionOk));
+            int(mappingIcpFallbackEnable));
 
-        if (mappingFallbackIcpSkipOnBadLmMotion && lastLMRan && !lmMotionOk)
+        // 5. 如果没有显式开启 ICP fallback，直接判定坏帧。
+        if (!mappingIcpFallbackEnable)
         {
-            RCLCPP_WARN(get_logger(),
-                "[ICP][SKIP] LM motion gate rejected the pose. Go directly to failed pose handling.");
-            rejectMappingPose(keepaliveTransform, "FAIL_LM_MOTION");
+            rejectMappingPose(lmFailReason);
             return;
         }
 
-        float icpTransform[6];
+        // 6. 只有 mappingIcpFallbackEnable == true 时，才执行 ICP fallback。
+        float icpTransform[6] = {0, 0, 0, 0, 0, 0};
         double icpFitness = std::numeric_limits<double>::infinity();
         int icpSourceSize = 0;
         int icpTargetSize = 0;
-        bool icpRan = runIcpFallback(initialGuessTransform, icpTransform, icpFitness, icpSourceSize, icpTargetSize);
+
+        bool icpRan = runIcpFallback(
+            frameInitialGuessTransform,
+            icpTransform,
+            icpFitness,
+            icpSourceSize,
+            icpTargetSize);
+
+        if (!icpRan)
+        {
+            RCLCPP_WARN(get_logger(),
+                "[ICP][FAIL] fallback enabled but ICP did not produce a candidate. "
+                "source=%d target=%d",
+                icpSourceSize,
+                icpTargetSize);
+
+            rejectMappingPose("FAIL_LM_ICP_NOT_RUN_OR_NOT_CONVERGED");
+            return;
+        }
+
+        bool icpFinite = transformIsFinite(icpTransform);
+
         MotionGateResult icpMotion;
-        if (icpRan)
+        bool icpMotionOk = false;
+
+        if (icpFinite)
         {
             icpMotion = evaluateMotionGate(icpTransform);
             logMotionGate("ICP", icpMotion);
+            icpMotionOk = icpMotion.continuous;
         }
 
-        bool icpUsable = icpRan &&
-                         transformIsFinite(icpTransform) &&
-                         icpMotion.continuous &&
-                         icpFitness < mappingFallbackIcpFitnessScore;
+        bool icpFitnessOk = icpFitness < mappingFallbackIcpFitnessScore;
+
+        bool icpUsable =
+            icpFinite &&
+            icpMotionOk &&
+            icpFitnessOk;
 
         if (icpUsable)
         {
             copyTransform(icpTransform, transformTobeMapped);
-            isDegenerate = false;
             transformUpdate();
-            const bool icpAccepted = acceptOrStageMappingCandidate("ICP", transformTobeMapped, keepaliveTransform);
+
+            // 可选：transformUpdate 后再做一次 finite 检查
+            if (!transformIsFinite(transformTobeMapped))
+            {
+                rejectMappingPose("FAIL_ICP_NOT_FINITE_AFTER_UPDATE");
+                return;
+            }
+
+            acceptMappingPose("ICP");
+
             RCLCPP_WARN(get_logger(),
-                "[ICP][%s] fitness=%.6f < %.6f source=%d target=%d",
-                icpAccepted ? "OK" : "PENDING",
-                icpFitness, mappingFallbackIcpFitnessScore,
-                icpSourceSize, icpTargetSize);
+                "[ICP][OK] fitness=%.6f < %.6f source=%d target=%d. Accept ICP pose.",
+                icpFitness,
+                mappingFallbackIcpFitnessScore,
+                icpSourceSize,
+                icpTargetSize);
+
             return;
         }
 
-        if (icpRan)
-        {
-            RCLCPP_WARN(get_logger(),
-                "[ICP][FAIL] fitness %.6f >= %.6f or motionOK=%d. source=%d target=%d",
-                icpFitness, mappingFallbackIcpFitnessScore,
-                int(icpMotion.continuous),
-                icpSourceSize, icpTargetSize);
-        }
+        RCLCPP_WARN(get_logger(),
+            "[ICP][FAIL] finite=%d motionOK=%d fitnessOK=%d fitness=%.6f threshold=%.6f "
+            "source=%d target=%d. Reject current frame.",
+            int(icpFinite),
+            int(icpMotionOk),
+            int(icpFitnessOk),
+            icpFitness,
+            mappingFallbackIcpFitnessScore,
+            icpSourceSize,
+            icpTargetSize);
 
-        rejectMappingPose(keepaliveTransform, "FAIL_LM_ICP");
+        rejectMappingPose("FAIL_LM_ICP");
     }
-
     void transformUpdate()
     {
         if (cloudInfo.imu_available == true)
@@ -1772,8 +1633,6 @@ public:
         transformTobeMapped[0] = constraintTransformation(transformTobeMapped[0], rotation_tollerance);
         transformTobeMapped[1] = constraintTransformation(transformTobeMapped[1], rotation_tollerance);
         transformTobeMapped[5] = constraintTransformation(transformTobeMapped[5], z_tollerance);
-
-        incrementalOdometryAffineBack = trans2Affine3f(transformTobeMapped);
     }
 
     float constraintTransformation(float value, float limit)
@@ -1976,14 +1835,21 @@ public:
             }
 
             aLoopIsClosed = false;
-            motionGateHasLast = false;
             lowSpeedGuessHasPrevTrusted = false;
             lowSpeedGuessHasLastTrusted = false;
-            hasLastTrustedMappingTransform = false;
-            mappingPredictedPoseAvailable = false;
-            mappingPredictedPoseTime = -1.0;
-            pendingRecoveryAvailable = false;
-            pendingRecoverySource = "NONE";
+            hasLastAcceptedTrackingTransform = false;
+            lastAcceptedTrackingTransformTime = -1.0;
+            lastAcceptedImuTransformAvailable = false;
+            if (!cloudKeyPoses6D->points.empty())
+            {
+                const auto& corrected = cloudKeyPoses6D->points.back();
+                transformTobeMapped[0] = corrected.roll;
+                transformTobeMapped[1] = corrected.pitch;
+                transformTobeMapped[2] = corrected.yaw;
+                transformTobeMapped[3] = corrected.x;
+                transformTobeMapped[4] = corrected.y;
+                transformTobeMapped[5] = corrected.z;
+            }
             mappingTrackingState = MappingTrackingState::TRACKING;
             mappingFailureCount = 0;
             mappingFirstFailureTime = -1.0;
@@ -1993,72 +1859,34 @@ public:
 
     void updateOdometryState()
     {
-        int correctionFlag = lidarCorrectionFlag;
-
-        static bool lastIncreOdomPubFlag = false;
-        static LioSamOdometryState laserOdomIncremental; // incremental odometry state
-        static Eigen::Affine3f increOdomAffine; // incremental odometry in affine
-        if (lastIncreOdomPubFlag == false)
+        if (!mappingPoseReliable || !transformIsFinite(transformTobeMapped))
+            return;
+        if (createdNewKeyframe && cloudKeyPoses6D && !cloudKeyPoses6D->points.empty())
         {
-            lastIncreOdomPubFlag = true;
-            laserOdomIncremental.timestamp = timeLaserInfoCur;
-            laserOdomIncremental.x = transformTobeMapped[3];
-            laserOdomIncremental.y = transformTobeMapped[4];
-            laserOdomIncremental.z = transformTobeMapped[5];
-            laserOdomIncremental.roll = transformTobeMapped[0];
-            laserOdomIncremental.pitch = transformTobeMapped[1];
-            laserOdomIncremental.yaw = transformTobeMapped[2];
-            laserOdomIncremental.correction_flag = correctionFlag;
-            increOdomAffine = trans2Affine3f(transformTobeMapped);
-        } else {
-            Eigen::Affine3f affineIncre = incrementalOdometryAffineFront.inverse() * incrementalOdometryAffineBack;
-            increOdomAffine = increOdomAffine * affineIncre;
-            float x, y, z, roll, pitch, yaw;
-            pcl::getTranslationAndEulerAngles (increOdomAffine, x, y, z, roll, pitch, yaw);
-            if (cloudInfo.imu_available == true)
-            {
-                if (std::abs(cloudInfo.imu_pitch_init) < 1.4)
-                {
-                    double imuWeight = 0.1;
-                    tf2::Quaternion imuQuaternion;
-                    tf2::Quaternion transformQuaternion;
-                    double rollMid, pitchMid, yawMid;
+            // 当前帧真的保存成了 keyframe。
+            // 因子图已经优化完成，correctPoses() 也已经执行。
+            // 所以这里必须使用优化后的最新 keyframe pose。
+            const auto& optimized = cloudKeyPoses6D->points.back();
+            float optimizedTransform[6];
+            optimizedTransform[0] = optimized.roll;
+            optimizedTransform[1] = optimized.pitch;
+            optimizedTransform[2] = optimized.yaw;
+            optimizedTransform[3] = optimized.x;
+            optimizedTransform[4] = optimized.y;
+            optimizedTransform[5] = optimized.z;
 
-                    // slerp roll
-                    transformQuaternion.setRPY(roll, 0, 0);
-                    imuQuaternion.setRPY(cloudInfo.imu_roll_init, 0, 0);
-                    tf2::Matrix3x3(transformQuaternion.slerp(imuQuaternion, imuWeight)).getRPY(rollMid, pitchMid, yawMid);
-                    roll = rollMid;
+            if (!transformIsFinite(optimizedTransform))
+                return;
 
-                    // slerp pitch
-                    transformQuaternion.setRPY(0, pitch, 0);
-                    imuQuaternion.setRPY(0, cloudInfo.imu_pitch_init, 0);
-                    tf2::Matrix3x3(transformQuaternion.slerp(imuQuaternion, imuWeight)).getRPY(rollMid, pitchMid, yawMid);
-                    pitch = pitchMid;
-                }
-            }
-            laserOdomIncremental.timestamp = timeLaserInfoCur;
-            laserOdomIncremental.x = x;
-            laserOdomIncremental.y = y;
-            laserOdomIncremental.z = z;
-            laserOdomIncremental.roll = roll;
-            laserOdomIncremental.pitch = pitch;
-            laserOdomIncremental.yaw = yaw;
-            laserOdomIncremental.correction_flag = correctionFlag;
+            copyTransform(optimizedTransform, transformTobeMapped);
+            commitLastAcceptedTrackingTransform( optimizedTransform, mappingPoseSource + "_KEYFRAME_OPTIMIZED");
+
+            return;
         }
-        latestLaserOdometryIncremental = laserOdomIncremental;
-        hasLatestLaserOdometryIncremental = true;
-
-        if (mappingPoseReliable &&
-            transformIsFinite(transformTobeMapped))
-        {
-            copyTransform(transformTobeMapped, lastTrustedMappingTransform);
-            hasLastTrustedMappingTransform = true;
-            commitLowSpeedTrustedPose(transformTobeMapped);
-            commitMotionGateReference(transformTobeMapped);
-            syncMappingPrediction(transformTobeMapped);
-        }
+        // 当前帧 LM/ICP 已经被 acceptMappingPose() 标记为可靠，
+        // 但是 saveFrame() 没达到关键帧阈值，所以没有进因子图。
+        // 这种情况下，应该直接保存当前 LM/ICP 合格位姿。
+        commitLastAcceptedTrackingTransform( transformTobeMapped, mappingPoseSource + "_NO_KEYFRAME");
     }
 
 };
-

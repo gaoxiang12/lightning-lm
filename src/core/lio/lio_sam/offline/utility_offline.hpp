@@ -149,18 +149,6 @@ struct LioSamCloudInfo
     pcl::PointCloud<PointType>::Ptr cloud_surface{new pcl::PointCloud<PointType>()};
 };
 
-struct LioSamOdometryState
-{
-    double timestamp = 0.0;
-    float x = 0.0f;
-    float y = 0.0f;
-    float z = 0.0f;
-    float roll = 0.0f;
-    float pitch = 0.0f;
-    float yaw = 0.0f;
-    int correction_flag = 0;
-};
-
 enum class SensorType { VELODYNE, OUSTER, LIVOX };
 
 class ParamServer : public rclcpp::Node
@@ -241,14 +229,10 @@ public:
     bool mappingMotionGateEnable;
     bool mappingIcpFallbackEnable;
     float mappingMotionMaxSpeed;
-    float mappingMotionMaxAcceleration;
     float mappingMotionMaxAngularVelocity;
-    float mappingMotionMaxAngularAcceleration;
     float mappingMotionMaxCurvature;
     float mappingMotionMaxRollPitchDeg;
     bool mappingFallbackIcpSkipOnBadLmMotion;
-    float mappingRecoveryMaxPositionError;
-    float mappingRecoveryMaxYawDeg;
     float mappingFallbackIcpMaxCorrespondenceDistance;
     int mappingFallbackIcpMaxIterations;
     float mappingFallbackIcpLeafSize;
@@ -402,22 +386,14 @@ public:
         get_parameter("mappingIcpFallbackEnable", mappingIcpFallbackEnable);
         declare_parameter("mappingMotionMaxSpeed", 3.0);
         get_parameter("mappingMotionMaxSpeed", mappingMotionMaxSpeed);
-        declare_parameter("mappingMotionMaxAcceleration", 4.0);
-        get_parameter("mappingMotionMaxAcceleration", mappingMotionMaxAcceleration);
         declare_parameter("mappingMotionMaxAngularVelocity", 90.0);
         get_parameter("mappingMotionMaxAngularVelocity", mappingMotionMaxAngularVelocity);
-        declare_parameter("mappingMotionMaxAngularAcceleration", 180.0);
-        get_parameter("mappingMotionMaxAngularAcceleration", mappingMotionMaxAngularAcceleration);
         declare_parameter("mappingMotionMaxCurvature", 2.0);
         get_parameter("mappingMotionMaxCurvature", mappingMotionMaxCurvature);
         declare_parameter("mappingMotionMaxRollPitchDeg", 20.0);
         get_parameter("mappingMotionMaxRollPitchDeg", mappingMotionMaxRollPitchDeg);
         declare_parameter("mappingFallbackIcpSkipOnBadLmMotion", true);
         get_parameter("mappingFallbackIcpSkipOnBadLmMotion", mappingFallbackIcpSkipOnBadLmMotion);
-        declare_parameter("mappingRecoveryMaxPositionError", 1.0);
-        get_parameter("mappingRecoveryMaxPositionError", mappingRecoveryMaxPositionError);
-        declare_parameter("mappingRecoveryMaxYawDeg", 45.0);
-        get_parameter("mappingRecoveryMaxYawDeg", mappingRecoveryMaxYawDeg);
         declare_parameter("mappingFallbackIcpMaxCorrespondenceDistance", 2.0);
         get_parameter("mappingFallbackIcpMaxCorrespondenceDistance", mappingFallbackIcpMaxCorrespondenceDistance);
         declare_parameter("mappingFallbackIcpMaxIterations", 10);
@@ -631,4 +607,3 @@ auto qos_lidar = rclcpp::QoS(
     qos_profile_lidar);
 
 #endif
-

@@ -11,7 +11,7 @@ endif ()
 set(CMAKE_BUILD_TYPE Release)
 
 # -------------------------------------------------------------
-# å¯¼å…¥ç¬¬ä¸‰æ–¹åº“ï¼ŒåŒæ—¶åšä¸€äº›å…¨å±€ç¼–è¯‘é€‰é¡¹é…ç½®
+# µ¼ÈëµÚÈı·½¿â£¬Í¬Ê±×öÒ»Ğ©È«¾Ö±àÒëÑ¡ÏîÅäÖÃ
 add_definitions("-DPCL_NO_PRECOMPILE")
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -fopenmp -fPIC -g")
@@ -32,7 +32,7 @@ file(MAKE_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(cmake/packages.cmake)
 
-# msg å’Œ srv
+# msg ºÍ srv
 set(MY_MSG_FILES "")
 set(MSG_DIR ${PROJECT_SOURCE_DIR}/msg)
 file(GLOB_RECURSE MSG_FILES ${MSG_DIR}/*.msg)

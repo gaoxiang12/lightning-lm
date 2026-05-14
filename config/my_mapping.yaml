@@ -148,6 +148,7 @@ lio_sam:
 
   # GPS settings
   useImuHeadingInitialization: false
+  useImuAccelRollPitchInitialization: false
   useGpsElevation: false
   gpsCovThreshold: 2.0
   poseCovThreshold: 25.0
@@ -197,6 +198,7 @@ lio_sam:
   # CPU params
   numberOfCores: 4
   mappingProcessInterval: 0.15
+  mappingLowSpeedMaxTranslationSpeed: 0.1
 
   # Surrounding map
   surroundingkeyframeAddingDistThreshold: 1.0
@@ -212,6 +214,15 @@ lio_sam:
   historyKeyframeSearchTimeDiff: 30.0
   historyKeyframeSearchNum: 25
   historyKeyframeFitnessScore: 0.3
+
+  # Motion gate settings
+  mappingMotionGateEnable: false
+  mappingIcpFallbackEnable: false
+  mappingMotionMaxSpeed: 3.0
+  mappingMotionMaxAngularVelocity: 1.0
+  mappingMotionMaxCurvature: 1.0
+  mappingMotionMaxRollPitchDeg: 30.0
+  mappingFallbackIcpSkipOnBadLmMotion: false
 
   # Visualization
   globalMapVisualizationSearchRadius: 1000.0
