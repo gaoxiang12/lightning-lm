@@ -176,8 +176,6 @@ bool LioSamMapping::LoadParamsFromYAML(const std::string& yaml_path) {
         ReadYamlParam<double>(lio_sam, "mappingProcessInterval", "mappingProcessInterval", overrides);
         ReadYamlParam<double>(lio_sam, "mappingLowSpeedMaxTranslationSpeed",
                               "mappingLowSpeedMaxTranslationSpeed", overrides);
-        ReadYamlParam<double>(lio_sam, "mappingLowSpeedMaxExtrapolationTime",
-                              "mappingLowSpeedMaxExtrapolationTime", overrides);
         ReadYamlParam<double>(lio_sam, "surroundingkeyframeAddingDistThreshold",
                               "surroundingkeyframeAddingDistThreshold", overrides);
         ReadYamlParam<double>(lio_sam, "surroundingkeyframeAddingAngleThreshold",

@@ -209,7 +209,7 @@ public:
     int numberOfCores;
     double mappingProcessInterval;
     float mappingLowSpeedMaxTranslationSpeed;
-    float mappingLowSpeedMaxExtrapolationTime;
+
 
     // Surrounding map
     float surroundingkeyframeAddingDistThreshold;
@@ -355,8 +355,6 @@ public:
         get_parameter("mappingProcessInterval", mappingProcessInterval);
         declare_parameter("mappingLowSpeedMaxTranslationSpeed", 0.8);
         get_parameter("mappingLowSpeedMaxTranslationSpeed", mappingLowSpeedMaxTranslationSpeed);
-        declare_parameter("mappingLowSpeedMaxExtrapolationTime", 1.0);
-        get_parameter("mappingLowSpeedMaxExtrapolationTime", mappingLowSpeedMaxExtrapolationTime);
 
         declare_parameter("surroundingkeyframeAddingDistThreshold", 1.0);
         get_parameter("surroundingkeyframeAddingDistThreshold", surroundingkeyframeAddingDistThreshold);
