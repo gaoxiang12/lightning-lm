@@ -198,7 +198,7 @@ lio_sam:
   # CPU params
   numberOfCores: 4
   mappingProcessInterval: 0.15
-  mappingLowSpeedMaxTranslationSpeed: 0.1
+  mappingLowSpeedMaxTranslationSpeed: 0.8
 
   # Surrounding map
   surroundingkeyframeAddingDistThreshold: 1.0
@@ -216,13 +216,13 @@ lio_sam:
   historyKeyframeFitnessScore: 0.3
 
   # Motion gate settings
-  mappingMotionGateEnable: false
+  mappingMotionGateEnable: true
   mappingIcpFallbackEnable: false
   mappingMotionMaxSpeed: 3.0
-  mappingMotionMaxAngularVelocity: 1.0
-  mappingMotionMaxCurvature: 1.0
-  mappingMotionMaxRollPitchDeg: 30.0
-  mappingFallbackIcpSkipOnBadLmMotion: false
+  mappingMotionMaxAngularVelocity: 90.0
+  mappingMotionMaxCurvature: 2.0
+  mappingMotionMaxRollPitchDeg: 20.0
+  mappingFallbackIcpSkipOnBadLmMotion: true
 
   # Visualization
   globalMapVisualizationSearchRadius: 1000.0
