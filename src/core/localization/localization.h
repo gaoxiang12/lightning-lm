@@ -1,5 +1,9 @@
 #pragma once
 
+#include <functional>
+#include <memory>
+#include <mutex>
+
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "std_msgs/msg/int32.hpp"
 
@@ -18,12 +22,20 @@ namespace loc {
 
 class LidarLoc;
 class PGO;
+class DualLidarOnlineCalibration;
+struct DualLidarCalibrationResult;
 
 /**
  * 实时定位接口实现
  */
 class Localization {
    public:
+    enum class Mode {
+        LOCALIZATION,
+        DUAL_LIDAR_ONLINE_CALIBRATION,
+        LOCALIZATION_WITH_DUAL_LIDAR_CALIB_MONITOR
+    };
+
     struct Options {
         Options() {}
 
@@ -39,6 +51,7 @@ class Localization {
         bool enable_lidar_loc_rviz_ = false;   // 是否允许调试用rviz
         int lidar_loc_skip_num_ = 4;           // 如果允许跳帧，跳多少帧
         bool loc_on_kf_ = false;
+        Mode mode_ = Mode::LOCALIZATION;
     };
 
     Localization(Options options = Options());
@@ -55,6 +68,8 @@ class Localization {
     /// 处理lidar消息
     void ProcessLidarMsg(const sensor_msgs::msg::PointCloud2::SharedPtr laser_msg);
     void ProcessLivoxLidarMsg(const livox_ros_driver2::msg::CustomMsg::SharedPtr laser_msg);
+    void ProcessDualLidarPointCloudPair(const sensor_msgs::msg::PointCloud2::SharedPtr& front_msg,
+                                        const sensor_msgs::msg::PointCloud2::SharedPtr& rear_msg);
 
     /// 处理IMU消息
     void ProcessIMUMsg(IMUPtr imu);
@@ -79,8 +94,12 @@ class Localization {
     using LocStateCallback = std::function<void(const std_msgs::msg::Int32& state)>;
     using PointcloudBodyCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
     using PointcloudWorldCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
+    using DualLidarCalibrationCallback = std::function<void(const DualLidarCalibrationResult& res)>;
 
     void SetTFCallback(TFCallback&& callback);
+    void SetDualLidarCalibrationCallback(DualLidarCalibrationCallback&& callback);
+    bool RunsLocalization() const { return options_.mode_ != Mode::DUAL_LIDAR_ONLINE_CALIBRATION; }
+    bool RunsDualLidarCalibration() const { return dual_lidar_calib_ != nullptr; }
 
     // void SetPathCallback(std::function<void(const nav_msgs::msg::Path& path)>&& callback);
     // void SetPointcloudWorldCallback(std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>&& callback);
@@ -108,6 +127,7 @@ class Localization {
 
     // lidar localization
     std::shared_ptr<LidarLoc> lidar_loc_;
+    std::shared_ptr<DualLidarOnlineCalibration> dual_lidar_calib_;
 
     /// TODO async 处理
     sys::AsyncMessageProcess<CloudPtr> lidar_odom_proc_cloud_;  // lidar odom 处理点云

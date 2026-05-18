@@ -1,4 +1,4 @@
-# 针对NCLT的配�?
+# 针对NCLT的配�?
 common:
   dataset: "nclt"
   lidar_topic: "points_raw"
@@ -12,9 +12,9 @@ fasterlio:
   blind: 0.5                # 盲区，小于盲区距离的不会处理
   time_scale: 1e-3             # 兼容不同数据集的时间单位，仅对Velodyne LiDAR(lidar_type=2)生效
 
-  skip_lidar_num: 0 # 点云的跳帧情�?
+  skip_lidar_num: 0 # 点云的跳帧情�?
   point_filter_num: 10 # 点云采样参数
-  max_iteration: 6 # 最大迭代次�?
+  max_iteration: 6 # 最大迭代次�?
   filter_size_scan: 0.5 # 对scan进行的降采样
   filter_size_map: 0.5
 
@@ -37,20 +37,20 @@ fasterlio:
 
 
 g2p5:
-  esti_floor: false   # 是否动态估计地�?
+  esti_floor: false   # 是否动态估计地�?
   lidar_height: 0.0   # 雷达安装高度
   floor_height: -1.2   # 默认地面高度
   min_th_floor: 0.50  # 距离地面这个高度的障碍物被扫入栅格地图中
   max_th_floor: 1.0  # 距离地面这个高度的障碍物被扫入栅格地图中
-  grid_map_resolution: 0.2 # 栅格地图分辨�?
+  grid_map_resolution: 0.2 # 栅格地图分辨�?
 
 system:
   frontend_type: "faster_lio" # options: faster_lio, lio_sam
-  with_loop_closing: true # 是否需要回环检�?
-  with_ui: true # 是否需�?D UI
-  with_2dui: false # 是否需�?D UI
-  with_g2p5: true # 是否需要栅格地�?
-  step_on_kf: false # 是否在关键帧处暂�?
+  with_loop_closing: true # 是否需要回环检�?
+  with_ui: true # 是否需�?D UI
+  with_2dui: false # 是否需�?D UI
+  with_g2p5: true # 是否需要栅格地�?
+  step_on_kf: false # 是否在关键帧处暂�?
 
   enable_lidar_loc_skip: false
   enable_lidar_loc_rviz: false
@@ -62,15 +62,55 @@ system:
   pub_tf: true
 
 loop_closing:
-  loop_kf_gap: 20       # 每隔多少个关键帧检查一�?
+  loop_kf_gap: 20       # 每隔多少个关键帧检查一�?
   min_id_interval: 20   # 被检查的关键帧ID间隔
   closest_id_th: 50     # 历史关键帧与当前帧的ID间隔
-  max_range: 30.0       # 候选帧的最大距�?
-  ndt_score_th: 1.0     # ndt位姿分�?
+  max_range: 30.0       # 候选帧的最大距�?
+  ndt_score_th: 1.0     # ndt位姿分�?
   with_height: true
 
 
 ### localization ================================================================================================
+localization:
+  mode: "localization"
+  # mode: "dual_lidar_online_calibration"
+  # mode: "localization_with_dual_lidar_calib_monitor"
+
+dual_lidar_online_calibration:
+  front_lidar_topic: "/front_lidar/points"
+  rear_lidar_topic: "/rear_lidar/points"
+  sync_tolerance: 0.02
+  max_queue_size: 20
+  publish_tf: false
+  registration_method: "gicp"   # gicp or icp
+  voxel_leaf_size: 0.3
+  blind: 0.5
+  point_filter_num: 1
+  min_points: 1000
+  max_iterations: 40
+  max_correspondence_distance: 2.0
+  transformation_epsilon: 1.0e-6
+  euclidean_fitness_epsilon: 1.0e-5
+  fitness_score_max_range: 2.0
+  max_fitness_score: 1.0
+  max_innovation_translation: 2.0
+  max_innovation_rotation_deg: 20.0
+  initial_translation: [0.0, 0.0, 0.0]
+  initial_rpy_deg: [0.0, 0.0, 0.0]
+  process_noise:
+    translation_std: 0.0005
+    rotation_std_deg: 0.005
+  initial_covariance:
+    translation_std: 1.0
+    rotation_std_deg: 10.0
+  measurement_noise:
+    translation_std: 0.05
+    rotation_std_deg: 1.0
+    fitness_translation_scale: 1.0
+    fitness_rotation_scale_deg: 5.0
+  output_interval: 10
+  output_yaml_path: "./dual_lidar_online_calibration.yaml"
+
 lidar_loc:
   enable_dynamic_polygon: false
   enable_parking_static: true
@@ -158,3 +198,13 @@ lio_sam:
   surroundingKeyframeDensity: 2.0
   surroundingKeyframeSearchRadius: 50.0
   loopClosureEnableFlag: false
+
+  # Motion gate settings
+  mappingLowSpeedMaxTranslationSpeed: 0.8
+  mappingMotionGateEnable: true
+  mappingIcpFallbackEnable: false
+  mappingMotionMaxSpeed: 3.0
+  mappingMotionMaxAngularVelocity: 90.0
+  mappingMotionMaxCurvature: 2.0
+  mappingMotionMaxRollPitchDeg: 20.0
+  mappingFallbackIcpSkipOnBadLmMotion: true

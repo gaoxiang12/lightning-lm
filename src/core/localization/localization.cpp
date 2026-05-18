@@ -1,11 +1,15 @@
 #include <pcl/common/transforms.h>
 #include <pcl_conversions/pcl_conversions.h>
 
+#include <utility>
+
+#include "core/localization/dual_lidar_online_calibration.h"
 #include "core/localization/lidar_loc/lidar_loc.h"
 #include "core/localization/localization.h"
 #include "core/localization/pose_graph/pgo.h"
 #include "io/yaml_io.h"
 #include "ui/pangolin_window.h"
+#include <yaml-cpp/yaml.h>
 
 namespace lightning::loc {
 
@@ -21,7 +25,35 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
     }
 
     YAML_IO yaml(yaml_path);
+    YAML::Node yaml_node = YAML::LoadFile(yaml_path);
+
     options_.with_ui_ = yaml.GetValue<bool>("system", "with_ui");
+    options_.mode_ = Mode::LOCALIZATION;
+    if (yaml_node["localization"] && yaml_node["localization"]["mode"]) {
+        const std::string mode = yaml_node["localization"]["mode"].as<std::string>();
+        if (mode == "dual_lidar_online_calibration") {
+            options_.mode_ = Mode::DUAL_LIDAR_ONLINE_CALIBRATION;
+        } else if (mode == "localization_with_dual_lidar_calib_monitor") {
+            options_.mode_ = Mode::LOCALIZATION_WITH_DUAL_LIDAR_CALIB_MONITOR;
+        } else if (mode != "localization") {
+            LOG(WARNING) << "unknown localization.mode: " << mode << ", use localization";
+        }
+    }
+
+    if (options_.mode_ != Mode::LOCALIZATION) {
+        dual_lidar_calib_ = std::make_shared<DualLidarOnlineCalibration>();
+        if (!dual_lidar_calib_->Init(yaml_path)) {
+            LOG(ERROR) << "failed to init dual lidar online calibration";
+            return false;
+        }
+    } else {
+        dual_lidar_calib_.reset();
+    }
+
+    if (!RunsLocalization()) {
+        LOG(INFO) << "localization mode is dual_lidar_online_calibration, skip normal localization chain.";
+        return true;
+    }
 
     /// lidar odom前端
     LaserMapping::Options opt_lio;
@@ -161,6 +193,14 @@ void Localization::ProcessLivoxLidarMsg(const livox_ros_driver2::msg::CustomMsg:
     } else {
         LidarOdomProcCloud(laser_cloud);
     }
+}
+
+void Localization::ProcessDualLidarPointCloudPair(const sensor_msgs::msg::PointCloud2::SharedPtr& front_msg,
+                                                  const sensor_msgs::msg::PointCloud2::SharedPtr& rear_msg) {
+    if (!dual_lidar_calib_) {
+        return;
+    }
+    dual_lidar_calib_->ProcessPointCloudPair(front_msg, rear_msg);
 }
 
 void Localization::LidarOdomProcCloud(CloudPtr cloud) {
@@ -308,7 +348,9 @@ void Localization::ProcessIMUMsg(IMUPtr imu) {
 // }
 
 void Localization::Finish() {
-    lidar_loc_->Finish();
+    if (lidar_loc_) {
+        lidar_loc_->Finish();
+    }
     if (ui_) {
         ui_->Quit();
     }
@@ -326,5 +368,11 @@ void Localization::SetExternalPose(const Eigen::Quaterniond& q, const Eigen::Vec
 }
 
 void Localization::SetTFCallback(Localization::TFCallback&& callback) { tf_callback_ = callback; }
+
+void Localization::SetDualLidarCalibrationCallback(Localization::DualLidarCalibrationCallback&& callback) {
+    if (dual_lidar_calib_) {
+        dual_lidar_calib_->SetResultCallback(std::move(callback));
+    }
+}
 
 }  // namespace lightning::loc

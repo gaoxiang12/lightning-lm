@@ -5,6 +5,9 @@
 #ifndef LIGHTNING_LOC_SYSTEM_H
 #define LIGHTNING_LOC_SYSTEM_H
 
+#include <deque>
+#include <mutex>
+
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
@@ -20,11 +23,13 @@
 #include "common/keyframe.h"
 
 #include "core/localization/localization_result.h"
+#include "core/system/async_message_process.h"
 
 namespace lightning {
 
 namespace loc {
 class Localization;
+struct DualLidarCalibrationResult;
 }
 
 class LocSystem {
@@ -54,8 +59,23 @@ class LocSystem {
 
     /// 发布base_link的TF
     void PublishBaseLinkTF(const lightning::loc::LocalizationResult& res);
+    void PublishDualLidarCalibrationTF(const lightning::loc::DualLidarCalibrationResult& res);
 
    private:
+    struct TimedCloud {
+        double timestamp = 0.0;
+        sensor_msgs::msg::PointCloud2::SharedPtr cloud = nullptr;
+    };
+
+    struct TimedCloudPair {
+        sensor_msgs::msg::PointCloud2::SharedPtr front_cloud = nullptr;
+        sensor_msgs::msg::PointCloud2::SharedPtr rear_cloud = nullptr;
+    };
+
+    void ProcessFrontLidar(const sensor_msgs::msg::PointCloud2::SharedPtr& cloud);
+    void ProcessRearLidar(const sensor_msgs::msg::PointCloud2::SharedPtr& cloud);
+    void TryProcessDualLidarPair();
+
     Options options_;
 
     std::shared_ptr<loc::Localization> loc_ = nullptr;  // 定位接口
@@ -72,10 +92,23 @@ class LocSystem {
     std::string imu_topic_;
     std::string cloud_topic_;
     std::string livox_topic_;
+    std::string front_lidar_topic_ = "/front_lidar/points";
+    std::string rear_lidar_topic_ = "/rear_lidar/points";
+
+    bool publish_dual_lidar_tf_ = false;
+    double dual_lidar_sync_tolerance_ = 0.02;
+    size_t dual_lidar_max_queue_size_ = 20;
 
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_ = nullptr;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_ = nullptr;
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr livox_sub_ = nullptr;
+    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr front_lidar_sub_ = nullptr;
+    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr rear_lidar_sub_ = nullptr;
+
+    std::mutex dual_lidar_mutex_;
+    std::deque<TimedCloud> front_lidar_queue_;
+    std::deque<TimedCloud> rear_lidar_queue_;
+    sys::AsyncMessageProcess<TimedCloudPair> dual_lidar_pair_proc_;
 };
 
 };  // namespace lightning
