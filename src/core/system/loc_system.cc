@@ -93,8 +93,11 @@ bool LocSystem::Init(const std::string &yaml_path) {
     if (ret) {
         LOG(INFO) << "online loc node has been created.";
     }
+    else {
+        LOG(ERROR) << "online loc node init failed.";
+        return false;
+    }
 
-    return ret;
 
     /// 双雷达在线标定旁路：
     /// LocSystem 只负责接收和同步 front/rear 点云；
