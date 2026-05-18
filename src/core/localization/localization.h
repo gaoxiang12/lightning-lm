@@ -99,7 +99,6 @@ class Localization {
     void SetTFCallback(TFCallback&& callback);
     void SetDualLidarCalibrationCallback(DualLidarCalibrationCallback&& callback);
     bool RunsLocalization() const { return options_.mode_ != Mode::DUAL_LIDAR_ONLINE_CALIBRATION; }
-    bool RunsDualLidarCalibration() const { return dual_lidar_calib_ != nullptr; }
 
     // void SetPathCallback(std::function<void(const nav_msgs::msg::Path& path)>&& callback);
     // void SetPointcloudWorldCallback(std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>&& callback);
