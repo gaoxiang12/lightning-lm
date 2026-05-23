@@ -326,6 +326,7 @@ void LaserMapping::ProcessPointCloud2(const sensor_msgs::msg::PointCloud2::Share
             if (timestamp < last_timestamp_lidar_) {
                 LOG(ERROR) << "lidar loop back, clear buffer";
                 lidar_buffer_.clear();
+                time_buffer_.clear();
             }
 
             LOG(INFO) << "get cloud at " << std::setprecision(14) << timestamp
@@ -356,6 +357,7 @@ void LaserMapping::ProcessPointCloud2(const livox_ros_driver2::msg::CustomMsg::S
             if (timestamp < last_timestamp_lidar_) {
                 LOG(ERROR) << "lidar loop back, clear buffer";
                 lidar_buffer_.clear();
+                time_buffer_.clear();
             }
 
             // LOG(INFO) << "get cloud at " << std::setprecision(14) << timestamp
@@ -381,6 +383,7 @@ void LaserMapping::ProcessPointCloud2(CloudPtr cloud) {
             if (timestamp < last_timestamp_lidar_) {
                 LOG(ERROR) << "lidar loop back, clear buffer";
                 lidar_buffer_.clear();
+                time_buffer_.clear();
             }
 
             lidar_buffer_.push_back(cloud);

@@ -11,6 +11,7 @@
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <algorithm>
 #include <cmath>
 #include <csignal>
 
@@ -44,41 +45,51 @@ bool LocSystem::Init(const std::string &yaml_path) {
     imu_topic_ = yaml.GetValue<std::string>("common", "imu_topic");
     cloud_topic_ = yaml.GetValue<std::string>("common", "lidar_topic");
     livox_topic_ = yaml.GetValue<std::string>("common", "livox_lidar_topic");
+    localization_mode_ = yaml.GetValue<std::string>("localization", "mode");
+    lidar_count_ = yaml.GetValue<int>("localization", "lidar_count");
 
-    /// 双雷达在线标定旁路配置：
-    /// 按原项目 YAML_IO 语法读取；如果配置不存在，则保持普通定位链路不受影响。
-    front_lidar_topic_ = yaml.GetValue<std::string>("dual_lidar_online_calibration", "front_lidar_topic");
-    rear_lidar_topic_ = yaml.GetValue<std::string>("dual_lidar_online_calibration", "rear_lidar_topic");
-    publish_dual_lidar_tf_ = yaml.GetValue<bool>("dual_lidar_online_calibration", "publish_tf");
-    dual_lidar_sync_tolerance_ = yaml.GetValue<double>("dual_lidar_online_calibration", "sync_tolerance");
+    if (lidar_count_ != 1 && lidar_count_ != 2) {
+        LOG(WARNING) << "invalid localization.lidar_count=" << lidar_count_ << ", use 1";
+        lidar_count_ = 1;
+    }
 
-    const int max_queue_size = yaml.GetValue<int>("dual_lidar_online_calibration", "max_queue_size");
-    dual_lidar_max_queue_size_ = max_queue_size > 0 ? static_cast<size_t>(max_queue_size) : 20;
+    pure_calibration_mode_ = localization_mode_ == "dual_lidar_online_calibration";
+    normal_localization_mode_ = localization_mode_ == "localization";
 
-    dual_lidar_options_valid_ = true;
+    if (!pure_calibration_mode_ && !normal_localization_mode_) {
+        LOG(WARNING) << "unknown localization.mode=" << localization_mode_ << ", use localization";
+        localization_mode_ = "localization";
+        normal_localization_mode_ = true;
+        pure_calibration_mode_ = false;
+    }
 
     rclcpp::QoS qos(10);
 
-    imu_sub_ = node_->create_subscription<sensor_msgs::msg::Imu>(
-        imu_topic_, qos, [this](sensor_msgs::msg::Imu::SharedPtr msg) {
-            IMUPtr imu = std::make_shared<IMU>();
-            imu->timestamp = ToSec(msg->header.stamp);
-            imu->linear_acceleration =
-                Vec3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
-            imu->angular_velocity = Vec3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
 
-            ProcessIMU(imu);
-        });
 
-    cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
-        cloud_topic_, qos, [this](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
-            Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
-        });
+    if (!loc_->Init(yaml_path, map_path)) {
+        LOG(ERROR) << "online loc node init failed.";
+        return false;
+    }
+    LOG(INFO) << "online loc node has been created.";
 
-    livox_sub_ = node_->create_subscription<livox_ros_driver2::msg::CustomMsg>(
-        livox_topic_, qos, [this](livox_ros_driver2::msg::CustomMsg ::SharedPtr cloud) {
-            Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
-        });
+    const bool subscribe_imu = normal_localization_mode_;
+    const bool subscribe_single_lidar = normal_localization_mode_ && lidar_count_ == 1;
+    const bool subscribe_dual_lidar_pair =
+        pure_calibration_mode_ || (normal_localization_mode_ && lidar_count_ == 2);
+
+    if (subscribe_imu) {
+        imu_sub_ = node_->create_subscription<sensor_msgs::msg::Imu>(
+            imu_topic_, qos, [this](sensor_msgs::msg::Imu::SharedPtr msg) {
+                IMUPtr imu = std::make_shared<IMU>();
+                imu->timestamp = ToSec(msg->header.stamp);
+                imu->linear_acceleration =
+                    Vec3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
+                imu->angular_velocity = Vec3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
+                ProcessIMU(imu);
+            });
+
+    }
 
     if (options_.pub_tf_) {
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(node_);
@@ -89,24 +100,33 @@ bool LocSystem::Init(const std::string &yaml_path) {
             [this](const lightning::loc::LocalizationResult& pose) { PublishBaseLinkTF(pose); });
     }
 
-    bool ret = loc_->Init(yaml_path, map_path);
-    if (ret) {
-        LOG(INFO) << "online loc node has been created.";
-    }
-    else {
-        LOG(ERROR) << "online loc node init failed.";
-        return false;
+    if (subscribe_single_lidar) {
+        cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
+            cloud_topic_, qos, [this](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
+                Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
+            });
+
+        livox_sub_ = node_->create_subscription<livox_ros_driver2::msg::CustomMsg>(
+            livox_topic_, qos, [this](livox_ros_driver2::msg::CustomMsg ::SharedPtr cloud) {
+                Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
+            });
     }
 
+    if (subscribe_dual_lidar_pair) {
+        const std::string pair_cfg_name =
+            pure_calibration_mode_ ? "dual_lidar_online_calibration" : "dual_lidar_localization";
 
-    /// 双雷达在线标定旁路：
-    /// LocSystem 只负责接收和同步 front/rear 点云；
-    /// Localization 内部如果没有 dual_lidar_calib_，ProcessDualLidarPointCloudPair() 会直接 return。
-    if (dual_lidar_options_valid_) {
-        dual_lidar_pair_proc_.SetName("dual lidar online calibration");
-        dual_lidar_pair_proc_.SetMaxSize(1);
+        front_lidar_topic_ = yaml.GetValue<std::string>(pair_cfg_name, "front_lidar_topic");
+        rear_lidar_topic_ = yaml.GetValue<std::string>(pair_cfg_name, "rear_lidar_topic");
+        dual_lidar_sync_tolerance_ = std::max(0.0, yaml.GetValue<double>(pair_cfg_name, "sync_tolerance"));
+        const int max_queue_size = yaml.GetValue<int>(pair_cfg_name, "max_queue_size");
+        dual_lidar_max_queue_size_ = max_queue_size > 0 ? static_cast<size_t>(max_queue_size) : 20;
+        const int pair_process_queue_size = std::max(1, yaml.GetValue<int>(pair_cfg_name, "pair_process_queue_size"));
+
+        dual_lidar_pair_proc_.SetName("dual lidar pair input");
+        dual_lidar_pair_proc_.SetMaxSize(pair_process_queue_size);
         dual_lidar_pair_proc_.SetProcFunc([this](const TimedCloudPair& pair) {
-            if (loc_ && pair.front_cloud && pair.rear_cloud) {
+            if (pair.front_cloud && pair.rear_cloud) {
                 loc_->ProcessDualLidarPointCloudPair(pair.front_cloud, pair.rear_cloud);
             }
         });
@@ -122,18 +142,29 @@ bool LocSystem::Init(const std::string &yaml_path) {
                 ProcessRearLidar(cloud);
             });
 
-        if (options_.pub_tf_ && publish_dual_lidar_tf_) {
-            loc_->SetDualLidarCalibrationCallback(
-                [this](const lightning::loc::DualLidarCalibrationResult& res) {
-                    PublishDualLidarCalibrationTF(res);
-                });
+        if (pure_calibration_mode_) {
+            loc_->SetDualLidarCalibrationCallback([this](const lightning::loc::DualLidarCalibrationResult& res) {
+                Eigen::Quaterniond q(res.T_front_rear.linear());
+                const Eigen::Vector3d t = res.T_front_rear.translation();
+
+                LOG(INFO) << "[DUAL_LIDAR_CALIB][RESULT] "
+                          << "front_lidar->rear_lidar "
+                          << "accepted=" << res.accepted_observations
+                          << " fitness=" << res.fitness
+                          << " translation=" << t.transpose()
+                          << " quaternion_xyzw="
+                          << q.x() << " " << q.y() << " " << q.z() << " " << q.w();
+            });
         }
 
-        LOG(INFO) << "dual lidar online calibration input enabled. front_topic=" << front_lidar_topic_
+        LOG(INFO) << "dual lidar pair input enabled. front_topic=" << front_lidar_topic_
                   << " rear_topic=" << rear_lidar_topic_
                   << " sync_tolerance=" << dual_lidar_sync_tolerance_
                   << " max_queue_size=" << dual_lidar_max_queue_size_
-                  << " publish_tf=" << publish_dual_lidar_tf_;
+                  << " pair_process_queue_size=" << pair_process_queue_size;
+        if (normal_localization_mode_ && lidar_count_ == 2) {
+            LOG(INFO) << "dual lidar localization enabled, common/lidar_topic is not subscribed";
+        }
     }
 
     return true;
@@ -143,73 +174,105 @@ void LocSystem::SetInitPose(const SE3 &pose) {
     LOG(INFO) << "set init pose: " << pose.translation().transpose() << ", "
               << pose.unit_quaternion().coeffs().transpose();
 
-    loc_->SetExternalPose(pose.unit_quaternion(), pose.translation());
+    if (loc_) {
+        loc_->SetExternalPose(pose.unit_quaternion(), pose.translation());
+    }
     loc_started_ = true;
 }
 
 void LocSystem::ProcessIMU(const IMUPtr &imu) {
-    if (loc_started_) {
+    if (loc_ && normal_localization_mode_) {
         loc_->ProcessIMUMsg(imu);
     }
 }
 
 void LocSystem::ProcessLidar(const sensor_msgs::msg::PointCloud2::SharedPtr &cloud) {
-    if (loc_started_) {
+    if (loc_ && normal_localization_mode_ && lidar_count_ == 1 && loc_started_) {
         loc_->ProcessLidarMsg(cloud);
     }
 }
 
 void LocSystem::ProcessLidar(const livox_ros_driver2::msg::CustomMsg::SharedPtr &cloud) {
-    if (loc_started_) {
+    if (loc_ && normal_localization_mode_ && lidar_count_ == 1 && loc_started_) {
         loc_->ProcessLivoxLidarMsg(cloud);
     }
 }
 
 void LocSystem::ProcessFrontLidar(const sensor_msgs::msg::PointCloud2::SharedPtr& cloud) {
-    if (!dual_lidar_options_valid_ || !cloud) {
+    if (!loc_ || !cloud) {
         return;
     }
 
-    std::lock_guard<std::mutex> lock(dual_lidar_mutex_);
-
-    front_lidar_queue_.push_back({ToSec(cloud->header.stamp), cloud});
-    while (front_lidar_queue_.size() > dual_lidar_max_queue_size_) {
-        front_lidar_queue_.pop_front();
+    if (normal_localization_mode_ && lidar_count_ == 2 && !loc_started_) {
+        return;
     }
 
-    TryProcessDualLidarPair();
+    if (!pure_calibration_mode_ && !(normal_localization_mode_ && lidar_count_ == 2)) {
+        return;
+    }
+
+    TimedCloudPair pair;
+    bool has_pair = false;
+    {
+        std::lock_guard<std::mutex> lock(dual_lidar_mutex_);
+
+        front_lidar_queue_.push_back({ToSec(cloud->header.stamp), cloud});
+        while (front_lidar_queue_.size() > dual_lidar_max_queue_size_) {
+            front_lidar_queue_.pop_front();
+        }
+
+        has_pair = TryPopDualLidarPairLocked(pair);
+    }
+
+    if (has_pair) {
+        dual_lidar_pair_proc_.AddMessage(pair);
+    }
 }
 
 void LocSystem::ProcessRearLidar(const sensor_msgs::msg::PointCloud2::SharedPtr& cloud) {
-    if (!dual_lidar_options_valid_ || !cloud) {
+    if (!loc_ || !cloud) {
         return;
     }
 
-    std::lock_guard<std::mutex> lock(dual_lidar_mutex_);
-
-    rear_lidar_queue_.push_back({ToSec(cloud->header.stamp), cloud});
-    while (rear_lidar_queue_.size() > dual_lidar_max_queue_size_) {
-        rear_lidar_queue_.pop_front();
+    if (normal_localization_mode_ && lidar_count_ == 2 && !loc_started_) {
+        return;
     }
 
-    TryProcessDualLidarPair();
+    if (!pure_calibration_mode_ && !(normal_localization_mode_ && lidar_count_ == 2)) {
+        return;
+    }
+
+    TimedCloudPair pair;
+    bool has_pair = false;
+    {
+        std::lock_guard<std::mutex> lock(dual_lidar_mutex_);
+
+        rear_lidar_queue_.push_back({ToSec(cloud->header.stamp), cloud});
+        while (rear_lidar_queue_.size() > dual_lidar_max_queue_size_) {
+            rear_lidar_queue_.pop_front();
+        }
+
+        has_pair = TryPopDualLidarPairLocked(pair);
+    }
+
+    if (has_pair) {
+        dual_lidar_pair_proc_.AddMessage(pair);
+    }
 }
 
-void LocSystem::TryProcessDualLidarPair() {
+bool LocSystem::TryPopDualLidarPairLocked(TimedCloudPair& pair) {
     while (!front_lidar_queue_.empty() && !rear_lidar_queue_.empty()) {
         const double dt =
             front_lidar_queue_.front().timestamp - rear_lidar_queue_.front().timestamp;
 
         if (std::abs(dt) <= dual_lidar_sync_tolerance_) {
-            TimedCloudPair pair;
             pair.front_cloud = front_lidar_queue_.front().cloud;
             pair.rear_cloud = rear_lidar_queue_.front().cloud;
 
             front_lidar_queue_.pop_front();
             rear_lidar_queue_.pop_front();
 
-            dual_lidar_pair_proc_.AddMessage(pair);
-            return;
+            return true;
         }
 
         if (dt < 0.0) {
@@ -224,6 +287,8 @@ void LocSystem::TryProcessDualLidarPair() {
             rear_lidar_queue_.pop_front();
         }
     }
+
+    return false;
 }
 
 void LocSystem::Spin() {
@@ -270,32 +335,6 @@ void LocSystem::PublishBaseLinkTF(const lightning::loc::LocalizationResult& res)
     msg.header.stamp = lightning::math::FromSec(res.timestamp_);
     msg.child_frame_id = "base_link";
     msg.transform = tf2::toMsg(T_map_base);
-
-    tf_broadcaster_->sendTransform(msg);
-}
-
-void LocSystem::PublishDualLidarCalibrationTF(
-    const lightning::loc::DualLidarCalibrationResult& res) {
-    if (!tf_broadcaster_) {
-        return;
-    }
-
-    Eigen::Quaterniond q(res.T_front_rear.linear());
-    q.normalize();
-
-    geometry_msgs::msg::TransformStamped msg;
-    msg.header.frame_id = "front_lidar";
-    msg.header.stamp = lightning::math::FromSec(res.timestamp);
-    msg.child_frame_id = "rear_lidar";
-
-    msg.transform.translation.x = res.T_front_rear.translation().x();
-    msg.transform.translation.y = res.T_front_rear.translation().y();
-    msg.transform.translation.z = res.T_front_rear.translation().z();
-
-    msg.transform.rotation.x = q.x();
-    msg.transform.rotation.y = q.y();
-    msg.transform.rotation.z = q.z();
-    msg.transform.rotation.w = q.w();
 
     tf_broadcaster_->sendTransform(msg);
 }

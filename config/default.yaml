@@ -29,7 +29,9 @@ fasterlio:
   b_acc_cov: 0.0001
   b_gyr_cov: 0.0001
   extrinsic_est_en: false      # true: enable the online estimation of IMU-LiDAR extrinsic
-  extrinsic_T: [ 0, 0, 0.28 ]
+  # T_imu_front: p_imu = T_imu_front * p_front.
+  # Front multi-line lidar center in imu_link: x forward, y right, z up, unit: m.
+  extrinsic_T: [ 8.260, 0.745, 0.409 ]
   extrinsic_R: [ 1, 0, 0,
                  0, 1, 0,
                  0, 0, 1 ]
@@ -73,15 +75,15 @@ loop_closing:
 ### localization ================================================================================================
 localization:
   mode: "localization"
+  lidar_count: 1
   # mode: "dual_lidar_online_calibration"
-  # mode: "localization_with_dual_lidar_calib_monitor"
 
 dual_lidar_online_calibration:
   front_lidar_topic: "/front_lidar/points"
   rear_lidar_topic: "/rear_lidar/points"
   sync_tolerance: 0.02
   max_queue_size: 20
-  publish_tf: false
+  pair_process_queue_size: 3
   registration_method: "gicp"   # gicp or icp
   voxel_leaf_size: 0.3
   blind: 0.5
@@ -95,8 +97,6 @@ dual_lidar_online_calibration:
   max_fitness_score: 1.0
   max_innovation_translation: 2.0
   max_innovation_rotation_deg: 20.0
-  initial_translation: [0.0, 0.0, 0.0]
-  initial_rpy_deg: [0.0, 0.0, 0.0]
   process_noise:
     translation_std: 0.0005
     rotation_std_deg: 0.005
@@ -110,6 +110,34 @@ dual_lidar_online_calibration:
     fitness_rotation_scale_deg: 5.0
   output_interval: 10
   output_yaml_path: "./dual_lidar_online_calibration.yaml"
+
+dual_lidar_localization:
+  # Dual lidar localization fuses front/rear into one virtual front_lidar cloud.
+  # fasterlio.extrinsic_T / extrinsic_R must describe p_imu = T_imu_front * p_front.
+  front_lidar_topic: "/front_lidar/points"
+  rear_lidar_topic: "/rear_lidar/points"
+  sync_tolerance: 0.02
+  max_queue_size: 20
+  pair_process_queue_size: 3
+  # true allows front-only or rear-only fallback when the paired message preprocesses to an empty cloud.
+  allow_single_lidar_fallback: true
+  # p_front = T_front_rear * p_rear.
+  # This is also used as the initial prior for dual_lidar_online_calibration.
+  T_front_rear:
+    translation: [-8.460, -1.490, 0.0]
+    rpy_deg: [0.0, 0.0, 0.0]
+  front_preprocess:
+    lidar_type: 2
+    blind: 0.5
+    time_scale: 0.001
+    scan_line: 32
+    point_filter_num: 1
+  rear_preprocess:
+    lidar_type: 2
+    blind: 0.5
+    time_scale: 0.001
+    scan_line: 32
+    point_filter_num: 1
 
 lidar_loc:
   enable_dynamic_polygon: false

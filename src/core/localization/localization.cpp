@@ -1,17 +1,75 @@
-#include <pcl/common/transforms.h>
-#include <pcl_conversions/pcl_conversions.h>
-
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <iomanip>
 #include <utility>
+#include <vector>
 
+#include "common/constant.h"
 #include "core/localization/dual_lidar_online_calibration.h"
 #include "core/localization/lidar_loc/lidar_loc.h"
 #include "core/localization/localization.h"
 #include "core/localization/pose_graph/pgo.h"
+#include "core/lightning_math.hpp"
 #include "io/yaml_io.h"
 #include "ui/pangolin_window.h"
 #include <yaml-cpp/yaml.h>
 
 namespace lightning::loc {
+namespace {
+
+SE3 ReadTransform(const YAML::Node& node) {
+    Vec3d t = Vec3d::Zero();
+    Mat3d R = Mat3d::Identity();
+
+    if (node["translation"]) {
+        const auto data = node["translation"].as<std::vector<double>>();
+        if (data.size() == 3) {
+            t = Vec3d(data[0], data[1], data[2]);
+        }
+    }
+
+    if (node["rotation"]) {
+        const auto data = node["rotation"].as<std::vector<double>>();
+        if (data.size() == 9) {
+            R = math::MatFromArray<double>(data);
+        }
+    } else if (node["rpy_deg"]) {
+        const auto data = node["rpy_deg"].as<std::vector<double>>();
+        if (data.size() == 3) {
+            const double roll = data[0] * constant::kDEG2RAD;
+            const double pitch = data[1] * constant::kDEG2RAD;
+            const double yaw = data[2] * constant::kDEG2RAD;
+            R = (Eigen::AngleAxisd(yaw, Vec3d::UnitZ()) *
+                 Eigen::AngleAxisd(pitch, Vec3d::UnitY()) *
+                 Eigen::AngleAxisd(roll, Vec3d::UnitX()))
+                    .toRotationMatrix();
+        }
+    }
+
+    return SE3(Eigen::Quaterniond(R).normalized(), t);
+}
+
+void ConfigurePreprocess(PointCloudPreprocess& preprocess, const YAML::Node& cfg) {
+    const int lidar_type = cfg["lidar_type"].as<int>();
+    preprocess.Blind() = cfg["blind"].as<double>();
+    preprocess.TimeScale() = cfg["time_scale"].as<float>();
+    preprocess.NumScans() = cfg["scan_line"].as<int>();
+    preprocess.PointFilterNum() = cfg["point_filter_num"].as<int>();
+
+    if (lidar_type == 1) {
+        preprocess.SetLidarType(LidarType::AVIA);
+    } else if (lidar_type == 2) {
+        preprocess.SetLidarType(LidarType::VELO32);
+    } else if (lidar_type == 3) {
+        preprocess.SetLidarType(LidarType::OUST64);
+    } else {
+        LOG(WARNING) << "unknown lidar_type " << lidar_type << ", use VELO32";
+        preprocess.SetLidarType(LidarType::VELO32);
+    }
+}
+
+}  // namespace
 
 // ！ 构造函数
 Localization::Localization(Options options) { options_ = options; }
@@ -19,41 +77,49 @@ Localization::Localization(Options options) { options_ = options; }
 // ！初始化函数
 bool Localization::Init(const std::string& yaml_path, const std::string& global_map_path) {
     UL lock(global_mutex_);
-    if (lidar_loc_ != nullptr) {
+    if (lidar_loc_ != nullptr || dual_lidar_calib_ != nullptr) {
         // 若已经启动，则变为初始化
         Finish();
+        lidar_loc_.reset();
+        lio_.reset();
+        pgo_.reset();
+        preprocess_.reset();
+        dual_lidar_calib_.reset();
     }
 
     YAML_IO yaml(yaml_path);
     YAML::Node yaml_node = YAML::LoadFile(yaml_path);
 
-    options_.with_ui_ = yaml.GetValue<bool>("system", "with_ui");
     options_.mode_ = Mode::LOCALIZATION;
-    if (yaml_node["localization"] && yaml_node["localization"]["mode"]) {
-        const std::string mode = yaml_node["localization"]["mode"].as<std::string>();
-        if (mode == "dual_lidar_online_calibration") {
-            options_.mode_ = Mode::DUAL_LIDAR_ONLINE_CALIBRATION;
-        } else if (mode == "localization_with_dual_lidar_calib_monitor") {
-            options_.mode_ = Mode::LOCALIZATION_WITH_DUAL_LIDAR_CALIB_MONITOR;
-        } else if (mode != "localization") {
-            LOG(WARNING) << "unknown localization.mode: " << mode << ", use localization";
-        }
+    options_.with_ui_ = yaml.GetValue<bool>("system", "with_ui");
+    const std::string mode = yaml.GetValue<std::string>("localization", "mode");
+    if (mode == "dual_lidar_online_calibration") {
+        options_.mode_ = Mode::DUAL_LIDAR_ONLINE_CALIBRATION;
+    } else if (mode == "localization") {
+        options_.mode_ = Mode::LOCALIZATION;
+    } else {
+        LOG(WARNING) << "unknown localization.mode: " << mode << ", use localization";
+        options_.mode_ = Mode::LOCALIZATION;
     }
 
-    if (options_.mode_ != Mode::LOCALIZATION) {
+    lidar_count_ = yaml.GetValue<int>("localization", "lidar_count");
+    if (lidar_count_ != 1 && lidar_count_ != 2) {
+        LOG(WARNING) << "invalid localization.lidar_count=" << lidar_count_ << ", use 1";
+        lidar_count_ = 1;
+    }
+
+    if (options_.mode_ == Mode::DUAL_LIDAR_ONLINE_CALIBRATION) {
         dual_lidar_calib_ = std::make_shared<DualLidarOnlineCalibration>();
         if (!dual_lidar_calib_->Init(yaml_path)) {
             LOG(ERROR) << "failed to init dual lidar online calibration";
             return false;
         }
-    } else {
-        dual_lidar_calib_.reset();
-    }
 
-    if (!RunsLocalization()) {
-        LOG(INFO) << "localization mode is dual_lidar_online_calibration, skip normal localization chain.";
+        LOG(INFO) << "dual lidar online calibration mode, skip normal localization chain.";
         return true;
     }
+
+    dual_lidar_calib_.reset();
 
     /// lidar odom前端
     LaserMapping::Options opt_lio;
@@ -156,6 +222,31 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
         LOG(WARNING) << "unknown lidar_type";
     }
 
+    if (options_.mode_ == Mode::LOCALIZATION && lidar_count_ == 2) {
+        const YAML::Node cfg = yaml_node["dual_lidar_localization"];
+        if (!cfg) {
+            LOG(ERROR) << "localization.lidar_count=2 but dual_lidar_localization config is missing";
+            return false;
+        }
+
+        if (!cfg["T_front_rear"] || !cfg["front_preprocess"] || !cfg["rear_preprocess"]) {
+            LOG(ERROR) << "dual_lidar_localization requires T_front_rear, front_preprocess and rear_preprocess";
+            return false;
+        }
+
+        T_front_rear_ = ReadTransform(cfg["T_front_rear"]);
+        allow_single_lidar_fallback_ = cfg["allow_single_lidar_fallback"].as<bool>();
+
+        ConfigurePreprocess(front_lidar_preprocess_, cfg["front_preprocess"]);
+        ConfigurePreprocess(rear_lidar_preprocess_, cfg["rear_preprocess"]);
+
+        LOG(INFO) << "[DUAL_LIDAR_LOC] virtual cloud frame is front_lidar. "
+                  << "fasterlio.extrinsic_T/R must be T_imu_front. "
+                  << "dual_lidar_localization.T_front_rear maps rear_lidar points into front_lidar frame. "
+                  << "T_front_rear t=[" << T_front_rear_.translation().transpose()
+                  << "], allow_single_lidar_fallback=" << allow_single_lidar_fallback_;
+    }
+
     return true;
 }
 
@@ -197,14 +288,123 @@ void Localization::ProcessLivoxLidarMsg(const livox_ros_driver2::msg::CustomMsg:
 
 void Localization::ProcessDualLidarPointCloudPair(const sensor_msgs::msg::PointCloud2::SharedPtr& front_msg,
                                                   const sensor_msgs::msg::PointCloud2::SharedPtr& rear_msg) {
-    if (!dual_lidar_calib_) {
+    if (dual_lidar_calib_) {
+        ProcessDualLidarCalibrationPair(front_msg, rear_msg);
+    }
+
+    if (options_.mode_ == Mode::LOCALIZATION && lidar_count_ == 2) {
+        ProcessDualLidarLocalizationPair(front_msg, rear_msg);
+    }
+}
+
+void Localization::ProcessDualLidarCalibrationPair(const sensor_msgs::msg::PointCloud2::SharedPtr& front_msg,
+                                                   const sensor_msgs::msg::PointCloud2::SharedPtr& rear_msg) {
+    if (!dual_lidar_calib_ || !front_msg || !rear_msg) {
         return;
     }
+
     dual_lidar_calib_->ProcessPointCloudPair(front_msg, rear_msg);
 }
 
+void Localization::ProcessDualLidarLocalizationPair(const sensor_msgs::msg::PointCloud2::SharedPtr& front_msg,
+                                                    const sensor_msgs::msg::PointCloud2::SharedPtr& rear_msg) {
+    UL lock(global_mutex_);
+    if (options_.mode_ != Mode::LOCALIZATION || lidar_count_ != 2 || !front_msg || !rear_msg) {
+        return;
+    }
+
+    CloudPtr front_cloud(new PointCloudType);
+    CloudPtr rear_cloud(new PointCloudType);
+    front_lidar_preprocess_.Process(front_msg, front_cloud);
+    rear_lidar_preprocess_.Process(rear_msg, rear_cloud);
+
+    front_cloud->header.stamp =
+        static_cast<uint64_t>(front_msg->header.stamp.sec) * 1000000000ull + front_msg->header.stamp.nanosec;
+    rear_cloud->header.stamp =
+        static_cast<uint64_t>(rear_msg->header.stamp.sec) * 1000000000ull + rear_msg->header.stamp.nanosec;
+
+    const double front_time = static_cast<double>(front_msg->header.stamp.sec) +
+                              static_cast<double>(front_msg->header.stamp.nanosec) * 1e-9;
+    const double rear_time = static_cast<double>(rear_msg->header.stamp.sec) +
+                             static_cast<double>(rear_msg->header.stamp.nanosec) * 1e-9;
+
+    const bool front_empty = front_cloud->empty();
+    const bool rear_empty = rear_cloud->empty();
+    if (front_empty && rear_empty) {
+        LOG(WARNING) << "[DUAL_LIDAR_LOC] both clouds are empty";
+        return;
+    }
+
+    if (!allow_single_lidar_fallback_ && (front_empty || rear_empty)) {
+        LOG(WARNING) << "[DUAL_LIDAR_LOC] one cloud is empty and fallback disabled. front="
+                     << front_cloud->size() << " rear=" << rear_cloud->size();
+        return;
+    }
+
+    CloudPtr virtual_cloud = BuildVirtualFrontCloud(front_cloud, rear_cloud, front_time, rear_time);
+    if (!virtual_cloud || virtual_cloud->empty()) {
+        LOG(WARNING) << "[DUAL_LIDAR_LOC] virtual front cloud is empty";
+        return;
+    }
+
+    LOG_EVERY_N(INFO, 10) << std::fixed << std::setprecision(9)
+                          << "[DUAL_LIDAR_LOC][INPUT] front_points=" << front_cloud->size()
+                          << " rear_points=" << rear_cloud->size()
+                          << " virtual_points=" << virtual_cloud->size()
+                          << " frame=front_lidar"
+                          << " dt_ms=" << std::abs(front_time - rear_time) * 1000.0
+                          << " fallback=" << allow_single_lidar_fallback_;
+
+    if (options_.online_mode_) {
+        lidar_odom_proc_cloud_.AddMessage(virtual_cloud);
+    } else {
+        LidarOdomProcCloud(virtual_cloud);
+    }
+}
+
+CloudPtr Localization::BuildVirtualFrontCloud(const CloudPtr& front_cloud,
+                                              const CloudPtr& rear_cloud,
+                                              double front_time,
+                                              double rear_time) const {
+    const double base_time = std::min(front_time, rear_time);
+    const double front_time_offset_ms = (front_time - base_time) * 1000.0;
+    const double rear_time_offset_ms = (rear_time - base_time) * 1000.0;
+
+    CloudPtr cloud(new PointCloudType);
+    cloud->reserve(front_cloud->size() + rear_cloud->size());
+
+    for (const auto& p : front_cloud->points) {
+        PointType q = p;
+        q.time += front_time_offset_ms;
+        cloud->push_back(q);
+    }
+
+    for (const auto& p : rear_cloud->points) {
+        const Vec3d pr = p.getVector3fMap().cast<double>();
+        const Vec3d pf = T_front_rear_ * pr;
+
+        PointType q = p;
+        q.x = static_cast<float>(pf.x());
+        q.y = static_cast<float>(pf.y());
+        q.z = static_cast<float>(pf.z());
+        q.time += rear_time_offset_ms;
+        cloud->push_back(q);
+    }
+
+    std::sort(cloud->points.begin(), cloud->points.end(), [](const PointType& a, const PointType& b) {
+        return a.time < b.time;
+    });
+
+    cloud->width = static_cast<uint32_t>(cloud->points.size());
+    cloud->height = 1;
+    cloud->is_dense = true;
+    cloud->header.stamp = static_cast<uint64_t>(base_time * 1e9);
+
+    return cloud;
+}
+
 void Localization::LidarOdomProcCloud(CloudPtr cloud) {
-    if (lio_ == nullptr) {
+    if (!cloud) {
         return;
     }
 
@@ -235,22 +435,14 @@ void Localization::LidarOdomProcCloud(CloudPtr cloud) {
         }
 
         lio_kf_ = kf;
+    }
 
-        auto scan = lio_->GetScanUndist();
+    auto scan = lio_->GetScanUndist();
 
-        if (options_.online_mode_) {
-            lidar_loc_proc_cloud_.AddMessage(scan);
-        } else {
-            LidarLocProcCloud(scan);
-        }
+    if (options_.online_mode_) {
+        lidar_loc_proc_cloud_.AddMessage(scan);
     } else {
-        auto scan = lio_->GetScanUndist();
-
-        if (options_.online_mode_) {
-            lidar_loc_proc_cloud_.AddMessage(scan);
-        } else {
-            LidarLocProcCloud(scan);
-        }
+        LidarLocProcCloud(scan);
     }
 }
 
@@ -259,6 +451,13 @@ void Localization::LidarLocProcCloud(CloudPtr scan_undist) {
 
     auto res = lidar_loc_->GetLocalizationResult();
     pgo_->ProcessLidarLoc(res);
+
+    if (options_.mode_ == Mode::LOCALIZATION && lidar_count_ == 2) {
+        LOG_EVERY_N(INFO, 10) << "[DUAL_LIDAR_LOC][NDT_RESULT] input_points=" << scan_undist->size()
+                              << " input_frame=virtual_front_lidar"
+                              << " score=" << res.confidence_
+                              << " valid=" << res.lidar_loc_valid_;
+    }
 
     if (ui_) {
         // Twi with Til, here pose means Twl, thus Til=I
@@ -276,7 +475,7 @@ void Localization::LidarLocProcCloud(CloudPtr scan_undist) {
 void Localization::ProcessIMUMsg(IMUPtr imu) {
     UL lock(global_mutex_);
 
-    if (lidar_loc_ == nullptr || lio_ == nullptr || pgo_ == nullptr) {
+    if (!imu) {
         return;
     }
 

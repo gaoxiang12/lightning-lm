@@ -4,8 +4,10 @@
 
 #include <boost/format.hpp>
 #include <cassert>
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <numeric>
 
 namespace lightning::loc {
 
@@ -39,6 +41,20 @@ std::string print_info(const std::vector<T>& edges, double th = 0) {
         return str;
     }
     return std::string("");
+}
+
+Mat6d InformationFromNoise(const Vec6d& noise, const Vec6d& weight) {
+    Mat6d cov = Mat6d::Zero();
+    for (int i = 0; i < 6; ++i) {
+        const double sigma = std::max(noise[i], 1e-6);
+        cov(i, i) = sigma * sigma;
+    }
+
+    Mat6d info = cov.inverse();
+    for (int i = 0; i < 6; ++i) {
+        info(i, i) *= weight[i];
+    }
+    return info;
 }
 
 }  // namespace
@@ -301,34 +317,14 @@ void PGOImpl::AddVertex() {
 }
 
 void PGOImpl::AddLidarLocFactors() {
-    // // 不支持未设置的或者无效的lidarLoc约束。
-    if (!current_frame_->lidar_loc_set_) {
+    if (!current_frame_->lidar_loc_set_ || !current_frame_->lidar_loc_valid_) {
         return;
     }
 
-    /// 不管lidarLoc是否为valid，factor都会加，只是可能会判为outlier
-    SE3 loc_obs_pose = current_frame_->lidar_loc_pose_;
-    Mat6d loc_obs_cov = Mat6d::Zero();
-    loc_obs_cov(0, 0) = lidar_loc_noise_[0] * lidar_loc_noise_[0];
-    loc_obs_cov(1, 1) = lidar_loc_noise_[1] * lidar_loc_noise_[1];
-    loc_obs_cov(2, 2) = lidar_loc_noise_[2] * lidar_loc_noise_[2];
-    loc_obs_cov(3, 3) = lidar_loc_noise_[3] * lidar_loc_noise_[3];
-    loc_obs_cov(4, 4) = lidar_loc_noise_[4] * lidar_loc_noise_[4];
-    loc_obs_cov(5, 5) = lidar_loc_noise_[5] * lidar_loc_noise_[5];
-
-    Mat6d loc_obs_info = loc_obs_cov.inverse();
-    Vec6d loc_obs_weight = current_frame_->lidar_loc_normalized_weight_;
-    loc_obs_info(0, 0) *= loc_obs_weight[0];
-    loc_obs_info(1, 1) *= loc_obs_weight[1];
-    loc_obs_info(2, 2) *= loc_obs_weight[2];
-    loc_obs_info(3, 3) *= loc_obs_weight[3];
-    loc_obs_info(4, 4) *= loc_obs_weight[4];
-    loc_obs_info(5, 5) *= loc_obs_weight[5];
-
     auto e = std::make_shared<miao::EdgeSE3Prior>();
     e->SetVertex(0, optimizer_->GetVertex(current_frame_->frame_id_));
-    e->SetMeasurement(loc_obs_pose);
-    e->SetInformation(loc_obs_info);
+    e->SetMeasurement(current_frame_->lidar_loc_pose_);
+    e->SetInformation(InformationFromNoise(lidar_loc_noise_, current_frame_->lidar_loc_normalized_weight_));
 
     auto rk = std::make_shared<miao::RobustKernelHuber>();
     rk->SetDelta(options_.lidar_loc_outlier_th);

@@ -34,11 +34,42 @@ T ReadYaml(const YAML::Node& node, const std::string& key, const T& default_valu
     return node[key].as<T>();
 }
 
-Eigen::Vector3d ReadVector3(const YAML::Node& node, const std::string& key, const Eigen::Vector3d& default_value) {
-    if (!node || !node[key] || !node[key].IsSequence() || node[key].size() < 3) {
-        return default_value;
+Eigen::Isometry3d ReadTransform(const YAML::Node& node) {
+    constexpr double kDeg2Rad = 3.14159265358979323846 / 180.0;
+    Eigen::Vector3d t = Eigen::Vector3d::Zero();
+    Eigen::Matrix3d R = Eigen::Matrix3d::Identity();
+
+    if (node["translation"]) {
+        const auto data = node["translation"].as<std::vector<double>>();
+        if (data.size() == 3) {
+            t = Eigen::Vector3d(data[0], data[1], data[2]);
+        }
     }
-    return Eigen::Vector3d(node[key][0].as<double>(), node[key][1].as<double>(), node[key][2].as<double>());
+
+    if (node["rotation"]) {
+        const auto data = node["rotation"].as<std::vector<double>>();
+        if (data.size() == 9) {
+            R << data[0], data[1], data[2],
+                 data[3], data[4], data[5],
+                 data[6], data[7], data[8];
+        }
+    } else if (node["rpy_deg"]) {
+        const auto data = node["rpy_deg"].as<std::vector<double>>();
+        if (data.size() == 3) {
+            const double roll = data[0] * kDeg2Rad;
+            const double pitch = data[1] * kDeg2Rad;
+            const double yaw = data[2] * kDeg2Rad;
+            R = (Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *
+                 Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY()) *
+                 Eigen::AngleAxisd(roll, Eigen::Vector3d::UnitX()))
+                    .toRotationMatrix();
+        }
+    }
+
+    Eigen::Isometry3d pose = Eigen::Isometry3d::Identity();
+    pose.linear() = R;
+    pose.translation() = t;
+    return pose;
 }
 
 }  // namespace
@@ -75,14 +106,17 @@ bool DualLidarOnlineCalibration::Init(const std::string& yaml_path) {
     fitness_score_max_range_ = ReadYaml<double>(cfg, "fitness_score_max_range", fitness_score_max_range_);
     max_fitness_score_ = ReadYaml<double>(cfg, "max_fitness_score", max_fitness_score_);
 
-    const Eigen::Vector3d init_t = ReadVector3(cfg, "initial_translation", Eigen::Vector3d::Zero());
-    const Eigen::Vector3d init_rpy_deg = ReadVector3(cfg, "initial_rpy_deg", Eigen::Vector3d::Zero());
-    T_front_rear_est_ = MakePose(init_t, init_rpy_deg * kPi / 180.0);
+    const YAML::Node loc_cfg = yaml["dual_lidar_localization"];
+    if (!loc_cfg || !loc_cfg["T_front_rear"]) {
+        LOG(ERROR) << "dual_lidar_localization.T_front_rear is required as the initial prior for dual lidar calibration";
+        return false;
+    }
+    T_front_rear_est_ = ReadTransform(loc_cfg["T_front_rear"]);
 
     P_.setZero();
     for (int i = 0; i < 3; ++i) {
-        P_(i, i) = 1.0 * 1.0;
-        P_(i + 3, i + 3) = Deg2Rad(10.0) * Deg2Rad(10.0);
+        P_(i, i) = 0.2 * 0.2;
+        P_(i + 3, i + 3) = Deg2Rad(3.0) * Deg2Rad(3.0);
     }
 
     output_interval_ = std::max(1, ReadYaml<int>(cfg, "output_interval", output_interval_));
@@ -139,9 +173,8 @@ void DualLidarOnlineCalibration::ProcessPointCloudPair(
     }
 
     accepted_observations_++;
-
+    LogEstimate(timestamp, result.fitness);
     if (accepted_observations_ % output_interval_ == 0) {
-        LogEstimate(timestamp, result.fitness);
         SaveYaml(timestamp, result.fitness);
     }
 
@@ -517,6 +550,16 @@ void DualLidarOnlineCalibration::SaveYaml(double timestamp, double fitness) cons
         return;
     }
     ofs << out.c_str() << std::endl;
+
+    LOG(INFO) << "[DUAL_LIDAR_CALIB][SAVE_YAML] path=" << output_yaml_path_
+          << " timestamp=" << timestamp
+          << " accepted=" << accepted_observations_
+          << " rejected=" << rejected_observations_
+          << " fitness=" << fitness
+          << " translation=" << T_front_rear_est_.translation().transpose()
+          << " rpy_deg=" << (rpy * 180.0 / kPi).transpose()
+          << " quaternion_xyzw=" << q.x() << " " << q.y() << " " << q.z() << " " << q.w()
+          << " covariance_diag=" << P_.diagonal().transpose();
 }
 
 void DualLidarOnlineCalibration::LogEstimate(double timestamp, double fitness) const {

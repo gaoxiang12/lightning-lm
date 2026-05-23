@@ -3,6 +3,7 @@
 #include <pcl/registration/icp.h>
 #include <chrono>
 #include <deque>
+#include <fstream>
 #include <iostream>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <thread>
