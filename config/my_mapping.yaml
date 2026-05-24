@@ -29,9 +29,7 @@ fasterlio:
   b_acc_cov: 0.0001
   b_gyr_cov: 0.0001
   extrinsic_est_en: false      # true: enable the online estimation of IMU-LiDAR extrinsic
-  # T_imu_front: p_imu = T_imu_front * p_front.
-  # Front multi-line lidar center in imu_link: x forward, y right, z up, unit: m.
-  extrinsic_T: [ 8.260, 0.745, 0.409 ]
+  extrinsic_T: [ 0.0, 0.0, 0.2 ]
   extrinsic_R: [ 1, 0, 0,
                  0, 1, 0,
                  0, 0, 1 ]
@@ -150,7 +148,7 @@ lio_sam:
 
   # GPS settings
   useImuHeadingInitialization: false
-  useImuAccelRollPitchInitialization: false
+  useImuAccelRollPitchInitialization: true
   useGpsElevation: false
   gpsCovThreshold: 2.0
   poseCovThreshold: 25.0

@@ -181,7 +181,7 @@ lio_sam:
 
   # GPS settings
   useImuHeadingInitialization: false
-  useImuAccelRollPitchInitialization: false
+  useImuAccelRollPitchInitialization: true
   useGpsElevation: false
   gpsCovThreshold: 2.0
   poseCovThreshold: 25.0
