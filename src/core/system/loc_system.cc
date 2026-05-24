@@ -278,7 +278,7 @@ void LocSystem::PublishBaseLinkTF(const lightning::loc::LocalizationResult& res)
     // T_map_base = T_map_imu * T_imu_base
     // 因为 T_imu_base 是 imu_link 到 base_link 的变换
     //T_map_base = T_map_imu * T_imu_base;
-    T_map_base = T_map_imu
+    T_map_base = T_map_imu;
     geometry_msgs::msg::TransformStamped msg;
     msg.header.frame_id = "map";
     msg.header.stamp = lightning::math::FromSec(res.timestamp_);
