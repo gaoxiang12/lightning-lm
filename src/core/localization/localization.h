@@ -22,19 +22,12 @@ namespace loc {
 
 class LidarLoc;
 class PGO;
-class DualLidarOnlineCalibration;
-struct DualLidarCalibrationResult;
 
 /**
  * 实时定位接口实现
  */
 class Localization {
    public:
-    enum class Mode {
-        LOCALIZATION,
-        DUAL_LIDAR_ONLINE_CALIBRATION
-    };
-
     struct Options {
         Options() {}
 
@@ -50,7 +43,6 @@ class Localization {
         bool enable_lidar_loc_rviz_ = false;   // 是否允许调试用rviz
         int lidar_loc_skip_num_ = 4;           // 如果允许跳帧，跳多少帧
         bool loc_on_kf_ = false;
-        Mode mode_ = Mode::LOCALIZATION;
     };
 
     Localization(Options options = Options());
@@ -90,10 +82,8 @@ class Localization {
     using LocStateCallback = std::function<void(const std_msgs::msg::Int32& state)>;
     using PointcloudBodyCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
     using PointcloudWorldCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
-    using DualLidarCalibrationCallback = std::function<void(const DualLidarCalibrationResult& res)>;
 
     void SetTFCallback(TFCallback&& callback);
-    void SetDualLidarCalibrationCallback(DualLidarCalibrationCallback&& callback);
     // void SetPathCallback(std::function<void(const nav_msgs::msg::Path& path)>&& callback);
     // void SetPointcloudWorldCallback(std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>&& callback);
     // void SetPointcloudBodyCallback(std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>&& callback);
@@ -104,8 +94,6 @@ class Localization {
     void LidarOdomProcCloud(CloudPtr cloud);
     void LidarLocProcCloud(CloudPtr scan);
 
-    void ProcessDualLidarCalibrationPair(const sensor_msgs::msg::PointCloud2::SharedPtr& front_msg,
-                                         const sensor_msgs::msg::PointCloud2::SharedPtr& rear_msg);
     void ProcessDualLidarLocalizationPair(const sensor_msgs::msg::PointCloud2::SharedPtr& front_msg,
                                           const sensor_msgs::msg::PointCloud2::SharedPtr& rear_msg);
     CloudPtr BuildVirtualFrontCloud(const CloudPtr& front_cloud,
@@ -132,7 +120,6 @@ class Localization {
 
     // lidar localization
     std::shared_ptr<LidarLoc> lidar_loc_;
-    std::shared_ptr<DualLidarOnlineCalibration> dual_lidar_calib_;
     int lidar_count_ = 1;
     PointCloudPreprocess front_lidar_preprocess_;
     PointCloudPreprocess rear_lidar_preprocess_;

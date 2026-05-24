@@ -75,57 +75,22 @@ loop_closing:
 ### localization ================================================================================================
 localization:
   mode: "localization"
-  lidar_count: 1
-  # mode: "dual_lidar_online_calibration"
-
-dual_lidar_online_calibration:
-  front_lidar_topic: "/front_lidar/points"
-  rear_lidar_topic: "/rear_lidar/points"
-  sync_tolerance: 0.02
-  max_queue_size: 20
-  pair_process_queue_size: 3
-  registration_method: "gicp"   # gicp or icp
-  voxel_leaf_size: 0.3
-  blind: 0.5
-  point_filter_num: 1
-  min_points: 1000
-  max_iterations: 40
-  max_correspondence_distance: 2.0
-  transformation_epsilon: 1.0e-6
-  euclidean_fitness_epsilon: 1.0e-5
-  fitness_score_max_range: 2.0
-  max_fitness_score: 1.0
-  max_innovation_translation: 2.0
-  max_innovation_rotation_deg: 20.0
-  process_noise:
-    translation_std: 0.0005
-    rotation_std_deg: 0.005
-  initial_covariance:
-    translation_std: 1.0
-    rotation_std_deg: 10.0
-  measurement_noise:
-    translation_std: 0.05
-    rotation_std_deg: 1.0
-    fitness_translation_scale: 1.0
-    fitness_rotation_scale_deg: 5.0
-  output_interval: 10
-  output_yaml_path: "./dual_lidar_online_calibration.yaml"
+  lidar_count: 2
 
 dual_lidar_localization:
   # Dual lidar localization fuses front/rear into one virtual front_lidar cloud.
   # fasterlio.extrinsic_T / extrinsic_R must describe p_imu = T_imu_front * p_front.
-  front_lidar_topic: "/front_lidar/points"
-  rear_lidar_topic: "/rear_lidar/points"
+  front_lidar_topic: "/lidar_points"
+  rear_lidar_topic: "/lidar_points_2"
   sync_tolerance: 0.02
   max_queue_size: 20
   pair_process_queue_size: 3
   # true allows front-only or rear-only fallback when the paired message preprocesses to an empty cloud.
   allow_single_lidar_fallback: true
   # p_front = T_front_rear * p_rear.
-  # This is also used as the initial prior for dual_lidar_online_calibration.
   T_front_rear:
     translation: [-8.460, -1.490, 0.0]
-    rpy_deg: [0.0, 0.0, 0.0]
+    rpy_deg: [0.0, 0.0, 180.0]
   front_preprocess:
     lidar_type: 2
     blind: 0.5

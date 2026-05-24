@@ -60,8 +60,6 @@ class LocSystem {
     /// 发布base_link的TF
     void PublishBaseLinkTF(const lightning::loc::LocalizationResult& res);
 
-    /// 发布双雷达标定 TF：front_lidar -> rear_lidar
-
    private:
     struct TimedCloud {
         double timestamp = 0.0;
@@ -93,10 +91,7 @@ class LocSystem {
     std::string imu_topic_;
     std::string cloud_topic_;
     std::string livox_topic_;
-    std::string localization_mode_ = "localization";
     int lidar_count_ = 1;
-    bool normal_localization_mode_ = true;
-    bool pure_calibration_mode_ = false;
 
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_ = nullptr;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_ = nullptr;

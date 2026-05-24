@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "common/constant.h"
-#include "core/localization/dual_lidar_online_calibration.h"
 #include "core/localization/lidar_loc/lidar_loc.h"
 #include "core/localization/localization.h"
 #include "core/localization/pose_graph/pgo.h"
@@ -77,49 +76,20 @@ Localization::Localization(Options options) { options_ = options; }
 // ！初始化函数
 bool Localization::Init(const std::string& yaml_path, const std::string& global_map_path) {
     UL lock(global_mutex_);
-    if (lidar_loc_ != nullptr || dual_lidar_calib_ != nullptr) {
+    if (lidar_loc_ != nullptr) {
         // 若已经启动，则变为初始化
         Finish();
         lidar_loc_.reset();
         lio_.reset();
         pgo_.reset();
         preprocess_.reset();
-        dual_lidar_calib_.reset();
     }
 
     YAML_IO yaml(yaml_path);
     YAML::Node yaml_node = YAML::LoadFile(yaml_path);
 
-    options_.mode_ = Mode::LOCALIZATION;
     options_.with_ui_ = yaml.GetValue<bool>("system", "with_ui");
-    const std::string mode = yaml.GetValue<std::string>("localization", "mode");
-    if (mode == "dual_lidar_online_calibration") {
-        options_.mode_ = Mode::DUAL_LIDAR_ONLINE_CALIBRATION;
-    } else if (mode == "localization") {
-        options_.mode_ = Mode::LOCALIZATION;
-    } else {
-        LOG(WARNING) << "unknown localization.mode: " << mode << ", use localization";
-        options_.mode_ = Mode::LOCALIZATION;
-    }
-
     lidar_count_ = yaml.GetValue<int>("localization", "lidar_count");
-    if (lidar_count_ != 1 && lidar_count_ != 2) {
-        LOG(WARNING) << "invalid localization.lidar_count=" << lidar_count_ << ", use 1";
-        lidar_count_ = 1;
-    }
-
-    if (options_.mode_ == Mode::DUAL_LIDAR_ONLINE_CALIBRATION) {
-        dual_lidar_calib_ = std::make_shared<DualLidarOnlineCalibration>();
-        if (!dual_lidar_calib_->Init(yaml_path)) {
-            LOG(ERROR) << "failed to init dual lidar online calibration";
-            return false;
-        }
-
-        LOG(INFO) << "dual lidar online calibration mode, skip normal localization chain.";
-        return true;
-    }
-
-    dual_lidar_calib_.reset();
 
     /// lidar odom前端
     LaserMapping::Options opt_lio;
@@ -222,7 +192,7 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
         LOG(WARNING) << "unknown lidar_type";
     }
 
-    if (options_.mode_ == Mode::LOCALIZATION && lidar_count_ == 2) {
+    if (lidar_count_ == 2) {
         const YAML::Node cfg = yaml_node["dual_lidar_localization"];
         if (!cfg) {
             LOG(ERROR) << "localization.lidar_count=2 but dual_lidar_localization config is missing";
@@ -252,10 +222,6 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
 
 void Localization::ProcessLidarMsg(const sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
     UL lock(global_mutex_);
-    if (lidar_loc_ == nullptr || lio_ == nullptr || pgo_ == nullptr) {
-        return;
-    }
-
     // 串行模式
     CloudPtr laser_cloud(new PointCloudType);
     preprocess_->Process(cloud, laser_cloud);
@@ -270,10 +236,6 @@ void Localization::ProcessLidarMsg(const sensor_msgs::msg::PointCloud2::SharedPt
 
 void Localization::ProcessLivoxLidarMsg(const livox_ros_driver2::msg::CustomMsg::SharedPtr cloud) {
     UL lock(global_mutex_);
-    if (lidar_loc_ == nullptr || lio_ == nullptr || pgo_ == nullptr) {
-        return;
-    }
-
     // 串行模式
     CloudPtr laser_cloud(new PointCloudType);
     preprocess_->Process(cloud, laser_cloud);
@@ -288,28 +250,15 @@ void Localization::ProcessLivoxLidarMsg(const livox_ros_driver2::msg::CustomMsg:
 
 void Localization::ProcessDualLidarPointCloudPair(const sensor_msgs::msg::PointCloud2::SharedPtr& front_msg,
                                                   const sensor_msgs::msg::PointCloud2::SharedPtr& rear_msg) {
-    if (dual_lidar_calib_) {
-        ProcessDualLidarCalibrationPair(front_msg, rear_msg);
-    }
-
-    if (options_.mode_ == Mode::LOCALIZATION && lidar_count_ == 2) {
+    if (lidar_count_ == 2) {
         ProcessDualLidarLocalizationPair(front_msg, rear_msg);
     }
-}
-
-void Localization::ProcessDualLidarCalibrationPair(const sensor_msgs::msg::PointCloud2::SharedPtr& front_msg,
-                                                   const sensor_msgs::msg::PointCloud2::SharedPtr& rear_msg) {
-    if (!dual_lidar_calib_ || !front_msg || !rear_msg) {
-        return;
-    }
-
-    dual_lidar_calib_->ProcessPointCloudPair(front_msg, rear_msg);
 }
 
 void Localization::ProcessDualLidarLocalizationPair(const sensor_msgs::msg::PointCloud2::SharedPtr& front_msg,
                                                     const sensor_msgs::msg::PointCloud2::SharedPtr& rear_msg) {
     UL lock(global_mutex_);
-    if (options_.mode_ != Mode::LOCALIZATION || lidar_count_ != 2 || !front_msg || !rear_msg) {
+    if (!front_msg || !rear_msg) {
         return;
     }
 
@@ -449,10 +398,10 @@ void Localization::LidarOdomProcCloud(CloudPtr cloud) {
 void Localization::LidarLocProcCloud(CloudPtr scan_undist) {
     lidar_loc_->ProcessCloud(scan_undist);
 
-    auto res = lidar_loc_->GetLocalizationResult();
+    auto res = lidar_loc_->GetLocalizationResult();  // ndt 绝对位姿
     pgo_->ProcessLidarLoc(res);
 
-    if (options_.mode_ == Mode::LOCALIZATION && lidar_count_ == 2) {
+    if (lidar_count_ == 2) {
         LOG_EVERY_N(INFO, 10) << "[DUAL_LIDAR_LOC][NDT_RESULT] input_points=" << scan_undist->size()
                               << " input_frame=virtual_front_lidar"
                               << " score=" << res.confidence_
@@ -567,11 +516,5 @@ void Localization::SetExternalPose(const Eigen::Quaterniond& q, const Eigen::Vec
 }
 
 void Localization::SetTFCallback(Localization::TFCallback&& callback) { tf_callback_ = callback; }
-
-void Localization::SetDualLidarCalibrationCallback(Localization::DualLidarCalibrationCallback&& callback) {
-    if (dual_lidar_calib_) {
-        dual_lidar_calib_->SetResultCallback(std::move(callback));
-    }
-}
 
 }  // namespace lightning::loc

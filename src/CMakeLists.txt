@@ -25,7 +25,6 @@ add_library(${PROJECT_NAME}.libs SHARED
         core/localization/lidar_loc/pclomp/ndt_omp.cpp
         core/localization/lidar_loc/pclomp/voxel_grid_covariance_omp.cpp
 
-        core/localization/dual_lidar_online_calibration.cc
         core/localization/pose_graph/pgo.cc
         core/localization/pose_graph/pgo_impl.cc
         core/localization/pose_graph/pose_extrapolator.cc
