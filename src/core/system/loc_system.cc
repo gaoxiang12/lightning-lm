@@ -248,7 +248,7 @@ void LocSystem::Spin() {
 
 void LocSystem::PublishBaseLinkTF(const lightning::loc::LocalizationResult& res) {
     geometry_msgs::msg::TransformStamped tf_imu_base;
-
+    /*
     try {
         // lookupTransform(target_frame, source_frame, time) - 返回 source_frame 到 target_frame 的变换
         // 我们需要 imu_link 到 base_link 的变换，所以 target_frame 是 base_link，source_frame 是 imu_link
@@ -261,7 +261,7 @@ void LocSystem::PublishBaseLinkTF(const lightning::loc::LocalizationResult& res)
         RCLCPP_WARN(node_->get_logger(), "lookup imu_link->base_link failed: %s", ex.what());
         return;
     }
-
+    */
     tf2::Transform T_map_imu, T_imu_base, T_map_base;
 
     // res.pose_ 视为 map->imu_link
@@ -273,12 +273,12 @@ void LocSystem::PublishBaseLinkTF(const lightning::loc::LocalizationResult& res)
     const auto q = res.pose_.so3().unit_quaternion();
     T_map_imu.setRotation(tf2::Quaternion(q.x(), q.y(), q.z(), q.w()));
 
-    tf2::fromMsg(tf_imu_base.transform, T_imu_base);
+    //tf2::fromMsg(tf_imu_base.transform, T_imu_base);
 
     // T_map_base = T_map_imu * T_imu_base
     // 因为 T_imu_base 是 imu_link 到 base_link 的变换
-    T_map_base = T_map_imu * T_imu_base;
-
+    //T_map_base = T_map_imu * T_imu_base;
+    T_map_base = T_map_imu
     geometry_msgs::msg::TransformStamped msg;
     msg.header.frame_id = "map";
     msg.header.stamp = lightning::math::FromSec(res.timestamp_);
