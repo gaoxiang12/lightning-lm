@@ -73,6 +73,11 @@ void PangolinWindow::UpdateRecentPose(const SE3& pose) {
     impl_->newest_frontend_pose_ = pose;
 }
 
+void PangolinWindow::UpdatePredictPose(const SE3& pose) {
+    UL lock(impl_->mtx_nav_state_);
+    impl_->predicted_pose_ = pose;
+}
+
 void PangolinWindow::UpdateScan(CloudPtr cloud, const SE3& pose) {
     std::lock_guard<std::mutex> lock(impl_->mtx_current_scan_);
     std::lock_guard<std::mutex> lock2(impl_->mtx_nav_state_);

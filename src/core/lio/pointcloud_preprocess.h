@@ -12,7 +12,7 @@
 
 namespace lightning {
 
-enum class LidarType { AVIA = 1, VELO32, OUST64 };
+enum class LidarType { AVIA = 1, VELO32 = 2, OUST64 = 3, ROBOSENSE = 4 };
 
 /**
  * point cloud preprocess
@@ -43,8 +43,14 @@ class PointCloudPreprocess {
     LidarType GetLidarType() const { return lidar_type_; }
     void SetLidarType(LidarType lt) { lidar_type_ = lt; }
 
+    void SetHeightROI(float height_max, float height_min) {
+        height_max_ = height_max;
+        height_min_ = height_min;
+    }
+
    private:
     void Oust64Handler(const sensor_msgs::msg::PointCloud2 ::SharedPtr &msg);
+    void RoboSenseHandler(const sensor_msgs::msg::PointCloud2 ::SharedPtr &msg);
     void VelodyneHandler(const sensor_msgs::msg::PointCloud2 ::SharedPtr &msg);
 
     PointCloudType cloud_full_, cloud_out_;
@@ -55,6 +61,9 @@ class PointCloudPreprocess {
     double blind_ = 0.01;
     float time_scale_ = 1e-3;
     bool given_offset_time_ = false;
+
+    float height_max_ = 1.0;
+    float height_min_ = -1.0;
 };
 }  // namespace lightning
 

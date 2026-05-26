@@ -74,8 +74,9 @@ class PangolinWindowImpl {
 
     pcl::PointCloud<PointType>::Ptr current_scan_ = nullptr;  // 当前scan
     SE3 newest_frontend_pose_;                                // 最新pose
-    SE3 newest_backend_pose_;                                 // 最新pose
-    SE3 current_scan_pose_;                                   // 当前scan对应的pose or Twb/Twi
+    SE3 predicted_pose_;
+    SE3 newest_backend_pose_;  // 最新pose
+    SE3 current_scan_pose_;    // 当前scan对应的pose or Twb/Twi
     std::deque<std::pair<int, int>> loop_info_;
     std::vector<LoopCandidate> new_loop_candidate_;
 
@@ -135,13 +136,16 @@ class PangolinWindowImpl {
 
     // text
     pangolin::GlText gltext_label_global_;
+    pangolin::GlText gltext_label_state_;
 
     // camera
     pangolin::OpenGlRenderState s_cam_main_;
 
     /// cloud rendering
-    ui::UiCar backend_car_{Vec3f(0.2, 0.2, 0.8)};               // 白色车
-    ui::UiCar frontend_car_{Vec3f(0.2, 0.2, 0.8)};              // 白色车
+    ui::UiCar backend_car_{Vec3f(0.2, 0.2, 0.8)};   // 白色车
+    ui::UiCar frontend_car_{Vec3f(0.2, 0.2, 0.8)};  // 白色车
+    ui::UiCar pred_car_{Vec3f(0.8, 0.5, 0.8)};      // 白色车
+
     std::map<int, std::shared_ptr<ui::UiCloud>> cloud_map_ui_;  // 用来渲染的点云地图
     std::map<int, std::shared_ptr<ui::UiCloud>> cloud_dyn_ui_;  // 用来渲染的点云地图
     std::shared_ptr<ui::UiCloud> current_scan_ui_;              // current scan
@@ -155,11 +159,13 @@ class PangolinWindowImpl {
     // 滤波器状态相关 Data logger object
     pangolin::DataLog log_vel_;           // odom frame下的速度
     pangolin::DataLog log_vel_baselink_;  // baselink frame下的速度
+    pangolin::DataLog log_bias_acc_;      // accelerometer bias
     pangolin::DataLog log_confidence_;    // confidence
     pangolin::DataLog log_error_;         // 误差
 
     std::unique_ptr<pangolin::Plotter> plotter_vel_ = nullptr;
     std::unique_ptr<pangolin::Plotter> plotter_vel_baselink_ = nullptr;
+    std::unique_ptr<pangolin::Plotter> plotter_bias_acc_ = nullptr;
     std::unique_ptr<pangolin::Plotter> plotter_confidence_ = nullptr;
     std::unique_ptr<pangolin::Plotter> plotter_err_ = nullptr;
     std::unique_ptr<pangolin::Plotter> plotter_err_eval_ = nullptr;

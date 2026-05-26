@@ -152,7 +152,7 @@ void LoopClosing::ComputeLoopCandidates() {
     // 保存成功的候选
     std::vector<LoopCandidate> succ_candidates;
     for (const auto& lc : candidates_) {
-        LOG(INFO) << "candi " << lc.idx1_ << ", " << lc.idx2_ << " s: " << lc.ndt_score_;
+        // LOG(INFO) << "candi " << lc.idx1_ << ", " << lc.idx2_ << " s: " << lc.ndt_score_;
         if (lc.ndt_score_ > options_.ndt_score_th_) {
             succ_candidates.emplace_back(lc);
         }
@@ -166,7 +166,7 @@ void LoopClosing::ComputeLoopCandidates() {
 }
 
 void LoopClosing::ComputeForCandidate(lightning::LoopCandidate& c) {
-    LOG(INFO) << "aligning " << c.idx1_ << " with " << c.idx2_;
+    // LOG(INFO) << "aligning " << c.idx1_ << " with " << c.idx2_;
     const int submap_idx_range = 40;
     auto kf1 = all_keyframes_.at(c.idx1_), kf2 = all_keyframes_.at(c.idx2_);
 
@@ -174,7 +174,7 @@ void LoopClosing::ComputeForCandidate(lightning::LoopCandidate& c) {
         CloudPtr submap(new PointCloudType);
         for (int idx = -submap_idx_range; idx < submap_idx_range; idx += 4) {
             int id = idx + given_id;
-            if (id < 0 || id > all_keyframes_.size()) {
+            if (id < 0 || id >= all_keyframes_.size()) {
                 continue;
             }
 
@@ -188,10 +188,10 @@ void LoopClosing::ComputeForCandidate(lightning::LoopCandidate& c) {
             }
 
             // 转到世界系下
-            SE3 Twb = kf->GetLIOPose();
+            SE3 Twb = kf->GetOptPose();
 
             if (!build_in_world) {
-                Twb = all_keyframes_.at(given_id)->GetLIOPose().inverse() * Twb;
+                Twb = all_keyframes_.at(given_id)->GetOptPose().inverse() * Twb;
             }
 
             CloudPtr cloud_trans(new PointCloudType);
@@ -211,7 +211,7 @@ void LoopClosing::ComputeForCandidate(lightning::LoopCandidate& c) {
         return;
     }
 
-    Mat4f Tw2 = kf2->GetLIOPose().matrix().cast<float>();
+    Mat4f Tw2 = kf2->GetOptPose().matrix().cast<float>();
 
     /// 不同分辨率下的匹配
     CloudPtr output(new PointCloudType);
@@ -242,7 +242,7 @@ void LoopClosing::ComputeForCandidate(lightning::LoopCandidate& c) {
     q.normalize();
     Vec3d t = T.block<3, 1>(0, 3);
 
-    c.Tij_ = kf1->GetLIOPose().inverse() * SE3(q, t);
+    c.Tij_ = kf1->GetOptPose().inverse() * SE3(q, t);
 
     // pcl::io::savePCDFileBinaryCompressed(
     //     "./data/lc_" + std::to_string(c.idx1_) + "_" + std::to_string(c.idx2_) + "_out.pcd", *output);
@@ -259,8 +259,6 @@ void LoopClosing::PoseOptimization() {
     kf_vert_.emplace_back(v);
 
     /// 上一个关键帧的运动约束
-    /// TODO 3D激光最好是跟前面多个帧都有关联
-
     for (int i = 1; i < 3; i++) {
         int id = cur_kf_->GetID() - i;
         if (id >= 0) {

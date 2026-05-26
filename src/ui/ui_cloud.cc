@@ -51,6 +51,7 @@ void UiCloud::Render() {
     // glPointSize(2.0);
 
     glBegin(GL_POINTS);
+    glPointSize(point_size_);
 
     for (int i = 0; i < xyz_data_.size(); ++i) {
         if (use_color_ == UseColor::PCL_COLOR) {

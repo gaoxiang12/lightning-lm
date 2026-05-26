@@ -18,11 +18,12 @@ namespace lightning {
  * 为了实现状态量的自由组合，搞了一套宏函数来实现自定状态变量各维度的索引，然而实际当中状态变量基本是固定的，并不希望这样子用。。
  * 而且宏函数无法调试，人类也看不到展开之后的宏长啥样
  * 重写的版本只使用固定的NavState，内部逻辑也在NavState里面定义，不做无谓的拓展了 （并没有谁去拓展那玩意）
- * n = 23, m = 24
+ * 固定状态：pos / rot / vel / bg
  */
 class ESKF {
    public:
     static constexpr int process_noise_dim_ = 12;                   // 过程噪声维度
+    static constexpr int pose_obs_dim_ = 6;                         // 激光观测只约束位姿
     static constexpr int state_dim_ = NavState::dim;                // 状态维度
     using StateVecType = NavState::VectState;                       // 状态向量类型
     using CovType = Eigen::Matrix<double, state_dim_, state_dim_>;  // 协方差矩阵
@@ -51,10 +52,12 @@ class ESKF {
         bool valid_ = true;
         bool converge_ = true;
 
-        Eigen::Matrix<double, Eigen::Dynamic, 1> residual_;          // residual: z-Hx
-        Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> h_x_;  // dr/dx, H阵
-        Eigen::Matrix<double, Eigen::Dynamic, 1> s_;
-        Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> R_;
+        Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> R_;  // R 阵，观测噪声
+
+        /// NOTE 我们还是传H^T H 比较好，光传一个H会因为残差维度不对导致没法融合各类残差
+        /// 这个只需累加即可
+        Eigen::Matrix<double, pose_obs_dim_, pose_obs_dim_> HTH_;
+        Eigen::Matrix<double, pose_obs_dim_, 1> HTr_;
 
         double lidar_residual_mean_ = 0;
         double lidar_residual_max_ = 0;
@@ -72,6 +75,18 @@ class ESKF {
         int max_iterations_ = 4;
         StateVecType epsi_;    // 收敛条件
         bool use_aa_ = false;  // use anderson accleration
+
+        /// 速度clip
+        double vel_clip_norm_ = 1.0;
+        double dv_ratio_ = 0.5;
+
+        double predict_cov_inflation_ = 1.01;
+        double min_cov_diag_ = 1e-9;
+        double degeneracy_threshold_ratio_ = 1e-3;
+        double degeneracy_cov_inflation_ = 1.02;
+        double max_update_translation_step_ = 0.5;
+        double max_update_rotation_step_deg_ = 5.0;
+        double max_update_velocity_step_ = 2.0;
     };
 
     /// 初始化
@@ -84,6 +99,8 @@ class ESKF {
         maximum_iter_ = options.max_iterations_;
         limit_ = options.epsi_;
         use_aa_ = options.use_aa_;
+
+        options_ = options;
     }
 
     /// IMU预测
@@ -129,6 +146,8 @@ class ESKF {
     /// anderson acceleration?
     bool use_aa_ = false;
     AndersonAcceleration<double, state_dim_, 10> aa_;
+
+    Options options_;
 };
 
 }  // namespace lightning

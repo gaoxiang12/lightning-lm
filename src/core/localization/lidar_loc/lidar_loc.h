@@ -47,10 +47,10 @@ class LidarLoc {
         bool enable_icp_adjust_ = false;               // 是否使用icp调整ndt匹配结果提高定位精度
 
         /// 点云过滤
-        float filter_z_min_ = -1.0;
+        // float filter_z_min_ = -1.0;
         float filter_z_max_ = 30.0;
-        float filter_intensity_min_ = 10.0;
-        float filter_intensity_max_ = 100.0;
+        // float filter_intensity_min_ = 10.0;
+        // float filter_intensity_max_ = 100.0;
 
         /// 地图配置
         TiledMap::Options map_option_ = TiledMap::Options();

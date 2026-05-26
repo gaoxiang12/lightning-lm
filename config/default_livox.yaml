@@ -9,12 +9,12 @@ common:
 fasterlio:
   lidar_type: 1                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR,
   scan_line: 32
-  blind: 0.5                # 盲区，小于盲区距离的不会处理
+  blind: 0.1                # 盲区，小于盲区距离的不会处理
   time_scale: 1e-3             # 兼容不同数据集的时间单位，仅对Velodyne LiDAR(lidar_type=2)生效
 
   skip_lidar_num: 0 # 点云的跳帧情况
-  point_filter_num: 10 # 点云采样参数
-  max_iteration: 6 # 最大迭代次数
+  point_filter_num: 4 # 点云采样参数
+  max_iteration: 4 # 最大迭代次数
   filter_size_scan: 0.5 # 对scan进行的降采样
   filter_size_map: 0.5
 
@@ -22,7 +22,7 @@ fasterlio:
   ivox_nearby_type: 18             # 6, 18, 26
   esti_plane_threshold: 0.1        # default=0.1
 
-  use_aa: true  # use anderson-acceleration
+  use_aa: false  # use anderson-acceleration
 
   acc_cov: 0.1
   gyr_cov: 0.1
@@ -34,6 +34,14 @@ fasterlio:
                  0, 1, 0,
                  0, 0, 1 ]
   keep_first_imu_estimation: false
+  kf_dis_th: 1.0
+  kf_angle_th: 10.0
+
+  enable_icp_part: false
+  plane_icp_weight: 300.0
+  min_pts: 500
+  imu_filter: false
+  proj_kfs: false
 
 
 g2p5:
@@ -64,9 +72,9 @@ loop_closing:
   loop_kf_gap: 20       # 每隔多少个关键帧检查一次
   min_id_interval: 20   # 被检查的关键帧ID间隔
   closest_id_th: 50     # 历史关键帧与当前帧的ID间隔
-  max_range: 30.0       # 候选帧的最大距离
+  max_range: 20.0       # 候选帧的最大距离
   ndt_score_th: 1.3     # ndt位姿分值
-  with_height: true
+  with_height: false
 
 
 ### localization ================================================================================================
@@ -84,7 +92,7 @@ lidar_loc:
   lidar_loc_odom_th: 0.5
   init_with_fp: true
   min_init_confidence: 1.8
-  update_dynamic_cloud: true
+  update_dynamic_cloud: false
   update_err_h: 0.2
   update_err_v: 0.2
   update_kf_dis: 2.0
@@ -120,8 +128,8 @@ pgo:
   rtk_outlier_th: 1.0
   smooth_factor: 0.01
 roi:
-  height_max: 0.5
-  height_min: -2.0
+  height_max: 10.0
+  height_min: 0.5
   range_max: 70
   range_min: 3.0
 ui:

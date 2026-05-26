@@ -5,6 +5,9 @@
 
 #include <glog/logging.h>
 
+#include "common/options.h"
+#include "core/lightning_math.hpp"
+
 namespace lightning::loc {
 
 PGO::PGO() : impl_(new PGOImpl), pose_extrapolator_(new PoseExtrapolator) {

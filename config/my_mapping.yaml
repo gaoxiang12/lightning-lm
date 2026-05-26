@@ -34,6 +34,14 @@ fasterlio:
                  0, 1, 0,
                  0, 0, 1 ]
   keep_first_imu_estimation: false
+  kf_dis_th: 2.0
+  kf_angle_th: 5.0
+
+  enable_icp_part: false
+  plane_icp_weight: 500.0
+  min_pts: 300
+  imu_filter: true
+  proj_kfs: false
 
 
 g2p5:

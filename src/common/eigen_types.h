@@ -39,6 +39,7 @@ using Vec3d = Eigen::Vector3d;
 using Vec4d = Eigen::Vector4d;
 using Vec6d = Eigen::Matrix<double, 6, 1>;
 using Vec7d = Eigen::Matrix<double, 7, 1>;
+using Vec12d = Eigen::Matrix<double, 12, 1>;
 using Vec15d = Eigen::Matrix<double, 15, 1>;
 using VecXd = Eigen::Matrix<double, Eigen::Dynamic, 1>;
 
@@ -52,7 +53,7 @@ using Mat3d = Eigen::Matrix<double, 3, 3>;
 using Mat4d = Eigen::Matrix<double, 4, 4>;
 using Mat6d = Eigen::Matrix<double, 6, 6>;
 
-using Mat12d = Eigen::Matrix<double, 1, 2>;
+using Mat12d = Eigen::Matrix<double, 12, 12>;
 using Mat36f = Eigen::Matrix<float, 3, 6>;
 using Mat23f = Eigen::Matrix<float, 2, 3>;
 using Mat66f = Eigen::Matrix<float, 6, 6>;

@@ -43,6 +43,8 @@ class PangolinWindow {
     /// 更新最新的pose
     void UpdateRecentPose(const SE3& pose);
 
+    void UpdatePredictPose(const SE3& pose);
+
     /// 更新一次scan和它对应的Pose
     void UpdateScan(CloudPtr cloud, const SE3& pose);
 

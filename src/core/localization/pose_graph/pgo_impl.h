@@ -9,6 +9,7 @@
 #include <thread>
 #include <vector>
 
+#include "common/constant.h"
 #include "common/eigen_types.h"
 #include "common/nav_state.h"
 #include "common/timed_pose.h"

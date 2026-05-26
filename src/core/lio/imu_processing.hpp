@@ -4,14 +4,18 @@
 #define FASTER_LIO_IMU_PROCESSING_H
 
 #include <glog/logging.h>
+#include <algorithm>
 #include <cmath>
 #include <deque>
 #include <fstream>
+#include <iostream>
+#include <vector>
 
 #include "common/eigen_types.h"
 #include "common/measure_group.h"
 #include "common/point_def.h"
 #include "core/lio/eskf.hpp"
+#include "core/lio/imu_filter.h"
 #include "core/lio/pose6d.h"
 #include "utils/timer.h"
 
@@ -35,6 +39,7 @@ class ImuProcess {
     void Process(const MeasureGroup &meas, ESKF &kf_state, CloudPtr &scan);
 
     bool IsIMUInited() const { return imu_need_init_ == false; }
+    void SetUseIMUFilter(bool b) { use_imu_filter_ = b; }
 
     double GetMeanAccNorm() const { return mean_acc_.norm(); }
 
@@ -63,17 +68,21 @@ class ImuProcess {
     Vec3d mean_gyr_ = Vec3d::Zero();
     Vec3d angvel_last_ = Vec3d ::Zero();
     Vec3d acc_s_last_ = Vec3d ::Zero();
+    double acc_scale_factor_ = 1.0;
 
     double last_lidar_end_time_ = 0;
     int init_iter_num_ = 1;
     bool b_first_frame_ = true;
     bool imu_need_init_ = true;
+
+    bool use_imu_filter_ = true;
+    IMUFilter filter_;
 };
 
 inline ImuProcess::ImuProcess() : b_first_frame_(true), imu_need_init_(true) {
     init_iter_num_ = 1;
     Q_.setZero();
-    Q_.diagonal() << 1e-4, 1e-4, 1e-4, 1e-4, 1e-4, 1e-4, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5;
+    Q_.diagonal() << 1e-4, 1e-4, 1e-4, 1e-4, 1e-4, 1e-4, 1e-5, 1e-5, 1e-5, 0.0, 0.0, 0.0;
     cov_acc_ = Vec3d(0.1, 0.1, 0.1);
     cov_gyr_ = Vec3d(0.1, 0.1, 0.1);
     cov_bias_gyr_ = Vec3d(0.0001, 0.0001, 0.0001);
@@ -89,6 +98,7 @@ inline void ImuProcess::Reset() {
     mean_acc_ = Vec3d(0, 0, -1.0);
     mean_gyr_ = Vec3d(0, 0, 0);
     angvel_last_.setZero();
+    acc_scale_factor_ = 1.0;
 
     imu_need_init_ = true;
     init_iter_num_ = 1;
@@ -146,20 +156,17 @@ inline void ImuProcess::IMUInit(const MeasureGroup &meas, ESKF &kf_state, int &N
 
     auto init_state = kf_state.GetX();
     init_state.timestamp_ = meas.imu_.back()->timestamp;
-    init_state.grav_ = S2(-mean_acc_ / mean_acc_.norm() * G_m_s2);
+    init_state.grav_ = -mean_acc_ / mean_acc_.norm() * G_m_s2;
     init_state.bg_ = mean_gyr_;
-    init_state.offset_t_lidar_ = t_lidar_mu_;
-    init_state.offset_R_lidar_ = R_lidar_imu_;
     kf_state.ChangeX(init_state);
 
     auto init_P = kf_state.GetP();
     init_P.setIdentity();
-    init_P(6, 6) = init_P(7, 7) = init_P(8, 8) = 0.00001;
-    init_P(9, 9) = init_P(10, 10) = init_P(11, 11) = 0.00001;
-    init_P(15, 15) = init_P(16, 16) = init_P(17, 17) = 0.0001;
-    init_P(18, 18) = init_P(19, 19) = init_P(20, 20) = 0.001;
-    init_P(21, 21) = init_P(22, 22) = 0.00001;
+    init_P.block<NavState::kBlockDim, NavState::kBlockDim>(NavState::kBgIdx, NavState::kBgIdx) =
+        0.0001 * Mat3d::Identity();
     kf_state.ChangeP(init_P);
+
+    // LOG(INFO) << "P diag: " << init_P.diagonal().transpose();
 
     last_imu_ = meas.imu_.back();
 }
@@ -186,6 +193,13 @@ inline void ImuProcess::UndistortPcl(const MeasureGroup &meas, ESKF &kf_state, C
     Vec3d acc = Vec3d::Zero();
     Vec3d gyro = Vec3d::Zero();
 
+    if (use_imu_filter_) {
+        for (auto &imu : v_imu) {
+            auto imu_f = filter_.Filter(*imu);
+            *imu = imu_f;
+        }
+    }
+
     for (auto it_imu = v_imu.begin(); it_imu < (v_imu.end() - 1); it_imu++) {
         auto &&head = *(it_imu);
         auto &&tail = *(it_imu + 1);
@@ -196,8 +210,7 @@ inline void ImuProcess::UndistortPcl(const MeasureGroup &meas, ESKF &kf_state, C
 
         angvel_avr = .5 * (head->angular_velocity + tail->angular_velocity);
         acc_avr = .5 * (head->linear_acceleration + tail->linear_acceleration);
-
-        acc_avr = acc_avr * G_m_s2 / mean_acc_.norm();  // - state_inout.ba;
+        acc_avr = acc_avr * acc_scale_factor_;
 
         if (head->timestamp < last_lidar_end_time_) {
             dt = tail->timestamp - last_lidar_end_time_;
@@ -217,18 +230,17 @@ inline void ImuProcess::UndistortPcl(const MeasureGroup &meas, ESKF &kf_state, C
         Q_.block<3, 3>(0, 0).diagonal() = cov_gyr_;
         Q_.block<3, 3>(3, 3).diagonal() = cov_acc_;
         Q_.block<3, 3>(6, 6).diagonal() = cov_bias_gyr_;
-        Q_.block<3, 3>(9, 9).diagonal() = cov_bias_acc_;
         kf_state.Predict(dt, Q_, gyro, acc);
 
         // LOG(INFO) << "gyro: " << gyro.transpose() << ", dt: " << dt;
 
-        // LOG(INFO) << "acc: " << acc.transpose() << " grav: " << kf_state.GetX().grav_.vec_.norm()
+        // LOG(INFO) << "acc: " << acc.transpose() << " grav: " << kf_state.GetX().grav_.norm()
         //           << ", vel: " << kf_state.GetX().vel_.transpose() << ", dt: " << dt;
 
         /* save the poses at each IMU measurements */
         imu_state = kf_state.GetX();
         angvel_last_ = angvel_avr - imu_state.bg_;
-        acc_s_last_ = imu_state.rot_ * (acc_avr - imu_state.ba_);
+        acc_s_last_ = imu_state.rot_ * acc_avr;
         for (int i = 0; i < 3; i++) {
             acc_s_last_[i] += imu_state.grav_[i];
         }
@@ -267,8 +279,14 @@ inline void ImuProcess::UndistortPcl(const MeasureGroup &meas, ESKF &kf_state, C
         acc_imu = (tail->acc);
         angvel_avr = (tail->gyr);
 
-        for (; it_pcl->time / double(1000) > head->offset_time; it_pcl--) {
+        for (; it_pcl->time / double(1000) > head->offset_time && it_pcl != pcl_out->points.begin(); it_pcl--) {
             dt = it_pcl->time / double(1000) - head->offset_time;
+
+            /// dt 有时候存在非法数据
+            if (dt < 0 || dt > lo::lidar_time_interval) {
+                // LOG(WARNING) << "find abnormal dt in cloud: " << dt;
+                continue;
+            }
 
             /* Transform to the 'end' frame, using only the rotation
              * Note: Compensation direction is INVERSE of Frame's moving direction
@@ -278,19 +296,18 @@ inline void ImuProcess::UndistortPcl(const MeasureGroup &meas, ESKF &kf_state, C
 
             Vec3d P_i(it_pcl->x, it_pcl->y, it_pcl->z);
             Vec3d T_ei(pos_imu + vel_imu * dt + 0.5 * acc_imu * dt * dt - imu_state.pos_);
-            Vec3d p_compensate = imu_state.offset_R_lidar_.inverse() *
-                                 (imu_state.rot_.inverse() *
-                                      (R_i * (imu_state.offset_R_lidar_ * P_i + imu_state.offset_t_lidar_) + T_ei) -
-                                  imu_state.offset_t_lidar_);  // not accurate!
+            Vec3d p_compensate = R_lidar_imu_.transpose() *
+                                 (imu_state.rot_.inverse() * (R_i * (R_lidar_imu_ * P_i + t_lidar_mu_) + T_ei) -
+                                  t_lidar_mu_);  // not accurate!
 
             // save Undistorted points and their rotation
             it_pcl->x = p_compensate(0);
             it_pcl->y = p_compensate(1);
             it_pcl->z = p_compensate(2);
 
-            if (it_pcl == pcl_out->points.begin()) {
-                break;
-            }
+            // if (it_pcl == pcl_out->points.begin()) {
+            //     break;
+            // }
         }
     }
 }
@@ -310,12 +327,25 @@ inline void ImuProcess::Process(const MeasureGroup &meas, ESKF &kf_state, CloudP
 
         auto imu_state = kf_state.GetX();
         if (init_iter_num_ > max_init_count_) {
-            cov_acc_ *= pow(G_m_s2 / mean_acc_.norm(), 2);
             imu_need_init_ = false;
 
             cov_acc_ = cov_acc_scale_;
             cov_gyr_ = cov_gyr_scale_;
-            LOG(INFO) << "imu init done, bg: " << imu_state.bg_.transpose() << ", ba: " << imu_state.ba_.transpose();
+            const double mean_acc_norm = mean_acc_.norm();
+
+            if (mean_acc_norm > 0.5 && mean_acc_norm < 1.5) {
+                acc_scale_factor_ = G_m_s2;
+            } else if (mean_acc_norm > 7.0 && mean_acc_norm < 12.0) {
+                acc_scale_factor_ = 1.0;
+            } else {
+                acc_scale_factor_ = 1.0;
+                LOG(WARNING) << "imu init mean acc norm is abnormal for unit inference: " << mean_acc_norm
+                             << ", keep accelerometer scale unchanged";
+            }
+
+            LOG(INFO) << "imu init done, bg: " << imu_state.bg_.transpose() << ", grav: " << imu_state.grav_.transpose()
+                      << ", acc scale: " << acc_scale_factor_ << ", mean: " << mean_acc_.transpose() << ", "
+                      << mean_gyr_.transpose();
         } else {
             LOG(INFO) << "waiting for imu init ... " << init_iter_num_;
         }

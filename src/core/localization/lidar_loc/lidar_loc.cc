@@ -11,6 +11,9 @@
 #include "pclomp/voxel_grid_covariance_omp_impl.hpp"
 
 #include "core/localization/lidar_loc/lidar_loc.h"
+
+#include <opencv2/highgui.hpp>
+
 #include "glog/logging.h"
 #include "io/file_io.h"
 #include "io/yaml_io.h"
@@ -23,8 +26,10 @@ LidarLoc::LidarLoc(LidarLoc::Options options) : options_(options) {
     pcl_ndt_.reset(new NDTType());
     pcl_ndt_->setResolution(1.0);
     pcl_ndt_->setNeighborhoodSearchMethod(pclomp::DIRECT7);
+    pcl_ndt_->setOulierRatio(0.45);
     pcl_ndt_->setStepSize(0.1);
-    pcl_ndt_->setMaximumIterations(4);
+    pcl_ndt_->setTransformationEpsilon(0.01);
+    pcl_ndt_->setMaximumIterations(20);
     pcl_ndt_->setNumThreads(4);
 
     pcl_ndt_rough_.reset(new NDTType());
@@ -62,10 +67,10 @@ bool LidarLoc::Init(const std::string& config_path) {
     options_.update_lidar_loc_score_ = yaml.GetValue<double>("lidar_loc", "update_lidar_loc_score");
     options_.min_init_confidence_ = yaml.GetValue<float>("lidar_loc", "min_init_confidence");
 
-    options_.filter_z_min_ = yaml.GetValue<double>("lidar_loc", "filter_z_min");
-    options_.filter_z_max_ = yaml.GetValue<double>("lidar_loc", "filter_z_max");
-    options_.filter_intensity_min_ = yaml.GetValue<double>("lidar_loc", "filter_intensity_min");
-    options_.filter_intensity_max_ = yaml.GetValue<double>("lidar_loc", "filter_intensity_max");
+    // options_.filter_z_min_ = yaml.GetValue<double>("lidar_loc", "filter_z_min");
+    // options_.filter_z_max_ = yaml.GetValue<double>("lidar_loc", "filter_z_max");
+    // options_.filter_intensity_min_ = yaml.GetValue<double>("lidar_loc", "filter_intensity_min");
+    // options_.filter_intensity_max_ = yaml.GetValue<double>("lidar_loc", "filter_intensity_max");
     options_.lidar_loc_odom_th_ = yaml.GetValue<double>("lidar_loc", "lidar_loc_odom_th");
 
     options_.init_with_fp_ = yaml.GetValue<bool>("lidar_loc", "init_with_fp");
@@ -288,7 +293,8 @@ bool LidarLoc::InitWithFP(CloudPtr input, const SE3& fp_pose) {
     double fitness_score;
     SE3 pose_esti = fp_pose;
     CloudPtr output_cloud(new PointCloudType);
-    loc_inited_ = YawSearch(pose_esti, fitness_score, input, output_cloud);
+    // loc_inited_ = YawSearch(pose_esti, fitness_score, input, output_cloud);
+    loc_inited_ = Localize(pose_esti, fitness_score, input, output_cloud);
 
     if (loc_inited_) {
         current_timestamp_ = math::ToSec(input->header.stamp);
@@ -539,6 +545,11 @@ void LidarLoc::Align(const CloudPtr& input) {
         // 如果有里程计，则用两个时刻的相对定位来递推，估计一个当前pose的初值
         const SE3 delta = last_lo_pose_.inverse() * current_lo_pose_;
         guess_from_lo = last_abs_pose_ * delta;
+
+        LOG(INFO) << "current lo pose: " << current_lo_pose_.translation().transpose();
+        LOG(INFO) << "last lo pose: " << last_lo_pose_.translation().transpose();
+        LOG(INFO) << "lo motion: " << delta.translation().transpose();
+        LOG(INFO) << "last abs pose: " << last_abs_pose_.translation().transpose();
         // guess_from_lo.translation()[2] = 0;
         LOG(INFO) << "loc using lo guess: " << guess_from_lo.translation().transpose();
     }
@@ -554,35 +565,33 @@ void LidarLoc::Align(const CloudPtr& input) {
         }
     }
 
-    SE3 guess_from_dr = guess_from_lo;
-    if (last_dr_pose_set_ && current_dr_pose_set_) {
-        const SE3 delta = last_dr_pose_.inverse() * current_dr_pose_;
-        guess_from_dr = last_abs_pose_ * delta;
-        // guess_from_dr.translation()[2] = 0;
-    }
+    // SE3 guess_from_dr = guess_from_lo;
+    // if (last_dr_pose_set_ && current_dr_pose_set_) {
+    //     const SE3 delta = last_dr_pose_.inverse() * current_dr_pose_;
+    //     guess_from_dr = last_abs_pose_ * delta;
+    //     // guess_from_dr.translation()[2] = 0;
+    // }
 
-    bool try_dr = false;
-    if (((guess_from_dr.translation() - guess_from_lo.translation()).norm() >= try_other_guess_trans_th_ ||
-         (guess_from_dr.so3().inverse() * guess_from_lo.so3()).log().norm() >= try_other_guess_rot_th_)) {
-        LOG(INFO) << "trying dr pose: " << guess_from_dr.translation().transpose() << ", "
-                  << (guess_from_dr.so3().inverse() * guess_from_lo.so3()).log().norm()
-                  << ", vel_norm: " << current_vel_b_.norm();
-        try_dr = true;
-    }
+    // bool try_dr = false;
+    // if (((guess_from_dr.translation() - guess_from_lo.translation()).norm() >= try_other_guess_trans_th_ ||
+    //      (guess_from_dr.so3().inverse() * guess_from_lo.so3()).log().norm() >= try_other_guess_rot_th_)) {
+    //     LOG(INFO) << "trying dr pose: " << guess_from_dr.translation().transpose() << ", "
+    //               << (guess_from_dr.so3().inverse() * guess_from_lo.so3()).log().norm()
+    //               << ", vel_norm: " << current_vel_b_.norm();
+    //     try_dr = true;
+    // }
 
     bool try_self = false;
-    if (((guess_from_self.translation() - guess_from_lo.translation()).norm() >= try_other_guess_trans_th_ ||
-         (guess_from_self.so3().inverse() * guess_from_lo.so3()).log().norm() >= try_other_guess_rot_th_) &&
-        ((guess_from_dr.translation() - guess_from_self.translation()).norm() >= try_other_guess_trans_th_ ||
-         (guess_from_dr.so3().inverse() * guess_from_self.so3()).log().norm() >= try_other_guess_rot_th_)) {
-        LOG(INFO) << "trying self extrap pose: " << guess_from_self.translation().transpose() << ", "
-                  << (guess_from_self.so3().inverse() * guess_from_lo.so3()).log().norm();
-        try_self = true;
-    }
-
-    if (!options_.try_self_extrap_) {
-        try_self = false;
-    }
+    // if (options_.try_self_extrap_) {
+    //     if (((guess_from_self.translation() - guess_from_lo.translation()).norm() >= try_other_guess_trans_th_ ||
+    //          (guess_from_self.so3().inverse() * guess_from_lo.so3()).log().norm() >= try_other_guess_rot_th_) &&
+    //         ((guess_from_dr.translation() - guess_from_self.translation()).norm() >= try_other_guess_trans_th_ ||
+    //          (guess_from_dr.so3().inverse() * guess_from_self.so3()).log().norm() >= try_other_guess_rot_th_)) {
+    //         LOG(INFO) << "trying self extrap pose: " << guess_from_self.translation().transpose() << ", "
+    //                   << (guess_from_self.so3().inverse() * guess_from_lo.so3()).log().norm();
+    //         try_self = true;
+    //     }
+    // }
 
     /// 5. 载入地图, 与地图匹配定位
     /// 尝试各种初始估计
@@ -594,7 +603,7 @@ void LidarLoc::Align(const CloudPtr& input) {
     bool loc_success = false;
 
     /// 注意load on pose存在滞后，优先load on DR
-    map_->LoadOnPose(guess_from_dr);
+    map_->LoadOnPose(guess_from_lo);
 
     loc_success_lo = Localize(current_pose_esti, fitness_score, input, output_cloud);  // LO 那个肯定会算
     double score_lo = fitness_score;
@@ -605,41 +614,46 @@ void LidarLoc::Align(const CloudPtr& input) {
     double score_dr = 0;
 
     // 先尝试外部预测，最后用自身
-    if (try_dr) {
-        /// 尝试DR外推的pose
-        res_of_dr = guess_from_dr;
-        loc_success_dr = Localize(res_of_dr, score_dr, input, output_cloud);
-        if (score_dr > (fitness_score - 0.1)) {
-            current_pose_esti = res_of_dr;
-            fitness_score = score_dr;
-            LOG(INFO) << "take dr guess: " << current_pose_esti.translation().transpose()
-                      << " , confidence: " << score_dr << ", v_norm: " << current_vel_b_.norm();
-        }
-    }
+    // if (try_dr) {
+    //     /// 尝试DR外推的pose
+    //     res_of_dr = guess_from_dr;
+    //     loc_success_dr = Localize(res_of_dr, score_dr, input, output_cloud);
+    //     if (score_dr > (fitness_score - 0.1)) {
+    //         current_pose_esti = res_of_dr;
+    //         fitness_score = score_dr;
+    //         LOG(INFO) << "take dr guess: " << current_pose_esti.translation().transpose()
+    //                   << " , confidence: " << score_dr << ", v_norm: " << current_vel_b_.norm();
+    //     }
+    // }
 
-    double score_self = 0;
-    if (try_self) {
-        /// 尝试自身外推的pose
-        LOG(INFO) << "localize with extrap";
+    // 用纯激光定位有点太抖了，加一些权重
+    Vec6d delta = (guess_from_lo.inverse() * current_pose_esti).log();
+    SE3 esti_balanced = guess_from_lo * SE3::exp(delta * 0.1);
+    current_pose_esti = esti_balanced;
 
-        res_of_self = guess_from_self;
-        loc_success_self = Localize(res_of_self, score_self, input, output_cloud);
+    // double score_self = 0;
+    // if (try_self) {
+    //     /// 尝试自身外推的pose
+    //     LOG(INFO) << "localize with extrap";
 
-        // 避免分值接近但长时间采信自身预测，此处更相信外部预测源
-        if (score_self > (fitness_score + 0.1)) {
-            current_pose_esti = res_of_self;
-            fitness_score = score_self;
-            LOG(INFO) << "take self guess: " << current_pose_esti.translation().transpose()
-                      << " , confidence: " << score_self;
-        }
-    }
+    //     res_of_self = guess_from_self;
+    //     loc_success_self = Localize(res_of_self, score_self, input, output_cloud);
+
+    //     // 避免分值接近但长时间采信自身预测，此处更相信外部预测源
+    //     if (score_self > (fitness_score + 0.1)) {
+    //         current_pose_esti = res_of_self;
+    //         fitness_score = score_self;
+    //         LOG(INFO) << "take self guess: " << current_pose_esti.translation().transpose()
+    //                   << " , confidence: " << score_self;
+    //     }
+    // }
 
     /// NOTE 如果LO, DR出发点和收敛点不同，但分值相近，说明场景可能处在退化状态，此时使用DR预测的Pose
-    if (try_dr && (res_of_lo.translation() - res_of_dr.translation()).head<2>().norm() > 0.2 &&
-        fabs(score_lo - score_dr) < 0.2 && score_lo < 1.2) {
-        LOG(WARNING) << "判定激光定位进入退化状态，现在会使用DR递推pose而不是激光定位位置";
-        current_pose_esti = guess_from_dr;
-    }
+    // if (try_dr && (res_of_lo.translation() - res_of_dr.translation()).head<2>().norm() > 0.2 &&
+    //     fabs(score_lo - score_dr) < 0.2 && score_lo < 1.2) {
+    //     LOG(WARNING) << "判定激光定位进入退化状态，现在会使用DR递推pose而不是激光定位位置";
+    //     current_pose_esti = guess_from_dr;
+    // }
 
     if (options_.force_2d_) {
         PoseRPYD RPYXYZ = math::SE3ToRollPitchYaw(current_pose_esti);
@@ -688,6 +702,10 @@ void LidarLoc::Align(const CloudPtr& input) {
 
     localization_result_.lidar_loc_odom_reliable_ = lo_reliable_;
     localization_result_.is_parking_ = false;
+
+    // if (ui_) {
+    //     ui_->UpdatePredictPose(guess_from_lo);
+    // }
 
     /// 7. 输出结果
     {
@@ -827,6 +845,11 @@ bool LidarLoc::Localize(SE3& pose, double& confidence, CloudPtr input, CloudPtr 
     trans = ndt->getFinalTransformation();
     confidence = ndt->getTransformationProbability();
 
+    auto tgt = ndt->getInputTarget();
+    if (!tgt->empty()) {
+        pcl::io::savePCDFile("./data/tgt.pcd", *tgt);
+    }
+
     if (loc_inited_ == false && confidence > options_.min_init_confidence_) {
         loc_success = true;
     } else {
@@ -850,7 +873,7 @@ bool LidarLoc::Localize(SE3& pose, double& confidence, CloudPtr input, CloudPtr 
         Eigen::AngleAxisf angle_axis(rotation_diff);
         float a = angle_axis.angle();
         float d = (trans.block<3, 1>(0, 3) - adjust_trans.block<3, 1>(0, 3)).norm();
-        LOG(INFO) << "icp ajust d: " << d << ", a: " << a;
+        LOG(INFO) << "icp adjust d: " << d << ", a: " << a;
 
         if (pcl_icp_->hasConverged() && std::fabs(d) <= 0.05 && std::fabs(a) <= 0.05) {
             LOG(INFO) << "icp ajust trans set success";

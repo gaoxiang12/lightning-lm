@@ -24,11 +24,8 @@ class EdgeHeightPrior : public BaseUnaryEdge<1, double, VertexSE3> {
     }
 
     void LinearizeOplus() override {
-        auto v0 = (VertexSE3 *)(vertices_[0]);
         jacobian_oplus_xi_.setZero();
-
-        Vec3d j = v0->Estimate().so3().matrix().block<1, 3>(2, 0).transpose();
-        jacobian_oplus_xi_.head<3>() = j;
+        jacobian_oplus_xi_[2] = 1;
     }
 };
 }  // namespace lightning::miao

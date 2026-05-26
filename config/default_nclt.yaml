@@ -14,7 +14,7 @@ fasterlio:
 
   skip_lidar_num: 0 # 点云的跳帧情况
   point_filter_num: 6 # 点云采样参数
-  max_iteration: 6 # 最大迭代次数
+  max_iteration: 4 # 最大迭代次数
   filter_size_scan: 0.5 # 对scan进行的降采样
   filter_size_map: 0.5
 
@@ -22,18 +22,26 @@ fasterlio:
   ivox_nearby_type: 18             # 6, 18, 26
   esti_plane_threshold: 0.1        # default=0.1
 
-  use_aa: true  # use anderson-acceleration
+  use_aa: false  # use anderson-acceleration
 
   acc_cov: 0.1
   gyr_cov: 0.1
   b_acc_cov: 0.0001
   b_gyr_cov: 0.0001
   extrinsic_est_en: false      # true: enable the online estimation of IMU-LiDAR extrinsic
-  extrinsic_T: [ 0, 0, 0.28 ]
+  extrinsic_T: [ 0, 0, 0.0 ]
   extrinsic_R: [ 1, 0, 0,
                  0, 1, 0,
                  0, 0, 1 ]
   keep_first_imu_estimation: false
+  kf_dis_th: 2.0
+  kf_angle_th: 5.0
+
+  enable_icp_part: false
+  plane_icp_weight: 500.0
+  min_pts: 300
+  imu_filter: true
+  proj_kfs: false
 
 
 g2p5:
@@ -48,7 +56,7 @@ system:
   with_loop_closing: true # 是否需要回环检测
   with_ui: true # 是否需要3D UI
   with_2dui: false # 是否需要2D UI
-  with_g2p5: true # 是否需要栅格地图
+  with_g2p5: false # 是否需要栅格地图
   step_on_kf: false # 是否在关键帧处暂停
 
   enable_lidar_loc_skip: false
@@ -60,7 +68,7 @@ system:
   pub_tf: true
 
 loop_closing:
-  loop_kf_gap: 20       # 每隔多少个关键帧检查一次
+  loop_kf_gap: 50       # 每隔多少个关键帧检查一次
   min_id_interval: 20   # 被检查的关键帧ID间隔
   closest_id_th: 50     # 历史关键帧与当前帧的ID间隔
   max_range: 30.0       # 候选帧的最大距离
@@ -119,7 +127,7 @@ pgo:
   rtk_outlier_th: 1.0
   smooth_factor: 0.01
 roi:
-  height_max: 0.5
+  height_max: 5.0
   height_min: -2.0
   range_max: 70
   range_min: 3.0

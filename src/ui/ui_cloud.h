@@ -37,6 +37,8 @@ class UiCloud {
     /// 指定自选颜色，RGBA
     void SetCustomColor(Vec4f custom_color);
 
+    void SetPointSize(float point_size) { point_size_ = point_size; }
+
    private:
     Vec4f IntensityToRgbPCL(const float& intensity) const {
         int index = int(intensity * 3);
@@ -47,6 +49,7 @@ class UiCloud {
     UseColor use_color_ = UseColor::PCL_COLOR;
     Vec4f custom_color_ = Vec4f::Zero();
 
+    float point_size_ = 1.0f;
     std::vector<Vec3f> xyz_data_;              // 点的世界坐标
     std::vector<Vec4f> color_data_pcl_;        // 根据intensity映射得到的颜色
     std::vector<Vec4f> color_data_intensity_;  // 点的intensity不映射直接做颜色

@@ -1,20 +1,20 @@
 # 针对NCLT的配置
 common:
-  dataset: "vbr"
-  lidar_topic: "/ouster/points"
+  dataset: "robosense"
+  lidar_topic: "/LIDAR/POINTS"
   livox_lidar_topic: "/livox/lidar"
-  imu_topic: "/imu/data"
+  imu_topic: "/IMU"
 
 # fasterlio 参数
 fasterlio:
-  lidar_type: 3                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR,
+  lidar_type: 4                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR, 4 for robosense
   scan_line: 32
   blind: 0.5                # 盲区，小于盲区距离的不会处理
   time_scale: 1e-3             # 兼容不同数据集的时间单位，仅对Velodyne LiDAR(lidar_type=2)生效
 
   skip_lidar_num: 0 # 点云的跳帧情况
-  point_filter_num: 10 # 点云采样参数
-  max_iteration: 6 # 最大迭代次数
+  point_filter_num: 6 # 点云采样参数
+  max_iteration: 4 # 最大迭代次数
   filter_size_scan: 0.5 # 对scan进行的降采样
   filter_size_map: 0.5
 
@@ -36,13 +36,12 @@ fasterlio:
 
   keep_first_imu_estimation: false
   kf_dis_th: 1.0
-  kf_angle_th: 5.0
+  kf_angle_th: 2.0
 
-  enable_icp_part: false
-  plane_icp_weight: 500.0
-  min_pts: 500
-  imu_filter: false
-  proj_kfs: false
+  enable_icp_part: true
+  kalman_R: 0.1
+  min_pts: 300
+  imu_filter: true
 
 g2p5:
   esti_floor: false   # 是否动态估计地面
@@ -55,9 +54,9 @@ g2p5:
 system:
   with_loop_closing: true # 是否需要回环检测
   with_ui: true  # 是否需要3D UI
-  with_2dui: false # 是否需要2D UI
+  with_2dui: true # 是否需要2D UI
   with_g2p5: true # 是否需要栅格地图
-  step_on_kf: false # 是否在关键帧处暂停
+  step_on_kf: true # 是否在关键帧处暂停
 
   enable_lidar_loc_skip: false
   enable_lidar_loc_rviz: false
@@ -86,8 +85,8 @@ lidar_loc:
   filter_z_max: 30.0
   filter_z_min: -1.0
   force_2d: false
-  grid_search_angle_range: 180.0
-  grid_search_angle_step: 60
+  grid_search_angle_range: 90.0
+  grid_search_angle_step: 10
   lidar_loc_odom_th: 0.5
   init_with_fp: true
   min_init_confidence: 0.8
@@ -127,8 +126,8 @@ pgo:
   rtk_outlier_th: 1.0
   smooth_factor: 0.01
 roi:
-  height_max: 0.5
-  height_min: -2.0
+  height_max: 10.0
+  height_min: -10.0
   range_max: 70
   range_min: 3.0
 ui:
