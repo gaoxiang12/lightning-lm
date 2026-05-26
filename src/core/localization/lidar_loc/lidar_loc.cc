@@ -712,10 +712,10 @@ void LidarLoc::Align(const CloudPtr& input) {
         UL lock(result_mutex_);
         localization_result_.timestamp_ = current_timestamp_;
         localization_result_.confidence_ = fitness_score;
-        if (match_fail_count_ < 100) {
+        if (loc_success) {
             localization_result_.lidar_loc_valid_ = true;
             localization_result_.status_ = LocalizationStatus::GOOD;
-        } else if (match_fail_count_ >= 100 && match_fail_count_ < 300) {
+        } else if (match_fail_count_ < 300) {
             localization_result_.lidar_loc_valid_ = false;
             localization_result_.status_ = LocalizationStatus::FOLLOWING_DR;
         } else {
@@ -845,15 +845,14 @@ bool LidarLoc::Localize(SE3& pose, double& confidence, CloudPtr input, CloudPtr 
     trans = ndt->getFinalTransformation();
     confidence = ndt->getTransformationProbability();
 
-    auto tgt = ndt->getInputTarget();
-    if (!tgt->empty()) {
-        pcl::io::savePCDFile("./data/tgt.pcd", *tgt);
-    }
-
-    if (loc_inited_ == false && confidence > options_.min_init_confidence_) {
-        loc_success = true;
-    } else {
-        loc_success = true;
+    const bool converged = ndt->hasConverged();
+    const bool confidence_valid = loc_inited_ || confidence > options_.min_init_confidence_;
+    loc_success = converged && confidence_valid;
+    if (!loc_success) {
+        LOG(WARNING) << "NDT localization rejected, converged: " << converged << ", confidence: " << confidence
+                     << ", required init confidence: " << options_.min_init_confidence_
+                     << ", initialized: " << loc_inited_;
+        return false;
     }
 
     if (options_.enable_icp_adjust_ && loc_inited_) {

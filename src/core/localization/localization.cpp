@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "common/constant.h"
+#include "common/options.h"
 #include "core/localization/lidar_loc/lidar_loc.h"
 #include "core/localization/localization.h"
 
@@ -19,6 +20,48 @@
 
 namespace lightning::loc {
 namespace {
+
+template <typename T>
+void ReadPgoValueIfPresent(const YAML::Node& config, const char* key, T& value) {
+    if (config[key]) {
+        value = config[key].as<T>();
+    }
+}
+
+void LoadPgoOptions(const YAML::Node& yaml) {
+    const YAML::Node config = yaml["pgo"];
+    if (!config) {
+        LOG(WARNING) << "PGO config section is missing, using defaults";
+        return;
+    }
+
+    ReadPgoValueIfPresent(config, "lidar_loc_pos_noise", pgo::lidar_loc_pos_noise);
+    ReadPgoValueIfPresent(config, "lidar_loc_outlier_th", pgo::lidar_loc_outlier_th);
+    ReadPgoValueIfPresent(config, "lidar_odom_pos_noise", pgo::lidar_odom_pos_noise);
+    ReadPgoValueIfPresent(config, "lidar_odom_outlier_th", pgo::lidar_odom_outlier_th);
+    ReadPgoValueIfPresent(config, "dr_pos_noise", pgo::dr_pos_noise);
+    ReadPgoValueIfPresent(config, "dr_pos_noise_ratio", pgo::dr_pos_noise_ratio);
+    ReadPgoValueIfPresent(config, "pgo_frame_converge_pos_th", pgo::pgo_frame_converge_pos_th);
+    ReadPgoValueIfPresent(config, "smooth_factor", pgo::pgo_smooth_factor);
+
+    double lidar_loc_ang_noise_deg = pgo::lidar_loc_ang_noise / constant::kDEG2RAD;
+    double lidar_odom_ang_noise_deg = pgo::lidar_odom_ang_noise / constant::kDEG2RAD;
+    double dr_ang_noise_deg = pgo::dr_ang_noise / constant::kDEG2RAD;
+    double converge_ang_th_deg = pgo::pgo_frame_converge_ang_th / constant::kDEG2RAD;
+    ReadPgoValueIfPresent(config, "lidar_loc_ang_noise", lidar_loc_ang_noise_deg);
+    ReadPgoValueIfPresent(config, "lidar_odom_ang_noise", lidar_odom_ang_noise_deg);
+    ReadPgoValueIfPresent(config, "dr_ang_noise", dr_ang_noise_deg);
+    ReadPgoValueIfPresent(config, "pgo_frame_converge_ang_th", converge_ang_th_deg);
+    pgo::lidar_loc_ang_noise = lidar_loc_ang_noise_deg * constant::kDEG2RAD;
+    pgo::lidar_odom_ang_noise = lidar_odom_ang_noise_deg * constant::kDEG2RAD;
+    pgo::dr_ang_noise = dr_ang_noise_deg * constant::kDEG2RAD;
+    pgo::pgo_frame_converge_ang_th = converge_ang_th_deg * constant::kDEG2RAD;
+
+    LOG(INFO) << "PGO config loaded, lidar loc pos noise: " << pgo::lidar_loc_pos_noise
+              << ", lidar loc angular noise(deg): " << lidar_loc_ang_noise_deg
+              << ", lidar loc outlier threshold: " << pgo::lidar_loc_outlier_th
+              << ", smoother factor: " << pgo::pgo_smooth_factor;
+}
 
 SE3 ReadTransform(const YAML::Node& node) {
     Vec3d t = Vec3d::Zero();
@@ -125,6 +168,7 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
     lidar_loc_->Init(yaml_path);
 
     /// pose graph
+    LoadPgoOptions(yaml_node);
     pgo_ = std::make_shared<PGO>();
     pgo_->SetDebug(false);
 

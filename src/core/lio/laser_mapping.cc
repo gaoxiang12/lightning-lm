@@ -6,6 +6,7 @@
 #include "core/lightning_math.hpp"
 #include "laser_mapping.h"
 
+#include <filesystem>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -44,6 +45,9 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
 
     auto yaml = YAML::LoadFile(yaml_file);
     try {
+        if (yaml["system"]["map_path"]) {
+            map::map_path = yaml["system"]["map_path"].as<std::string>();
+        }
         fasterlio::NUM_MAX_ITERATIONS = yaml["fasterlio"]["max_iteration"].as<int>();
         fasterlio::ESTI_PLANE_THRESHOLD = yaml["fasterlio"]["esti_plane_threshold"].as<float>();
 
@@ -176,7 +180,7 @@ bool LaserMapping::Run() {
     /// IMU process, kf prediction, undistortion
     p_imu_->Process(measures_, kf_, scan_undistort_);
 
-    if (scan_undistort_->empty() || (scan_undistort_ == nullptr)) {
+    if (scan_undistort_ == nullptr || scan_undistort_->empty()) {
         LOG(WARNING) << "No point, skip this scan!";
         return false;
     }
@@ -347,6 +351,9 @@ void LaserMapping::ProjectKFs(CloudPtr cloud, int size_limit) {
     pose_cur = pose_cur.inverse();
 
     for (auto kf : proj_kfs_) {
+        if (kf == nullptr || kf->GetCloud() == scan_undistort_) {
+            continue;
+        }
         // LOG(INFO) << "projecting kf: " << kf->GetID();
         // if (last_kf_) {
         // auto kf = last_kf_;
@@ -509,6 +516,14 @@ bool LaserMapping::SyncPackages() {
     if (!lidar_pushed_) {
         measures_.scan_ = lidar_buffer_.front();
         measures_.lidar_begin_time_ = time_buffer_.front();
+
+        if (measures_.scan_ == nullptr || measures_.scan_->points.empty()) {
+            LOG(WARNING) << "Empty input point cloud, drop scan";
+            lidar_buffer_.pop_front();
+            time_buffer_.pop_front();
+            lidar_pushed_ = false;
+            return false;
+        }
 
         if (measures_.scan_->points.size() <= 1) {
             LOG(WARNING) << "Too few input point cloud!";
@@ -888,9 +903,12 @@ void LaserMapping::SaveMap() {
     /// 保存地图
     auto global_map = GetGlobalMap(true);
 
-    pcl::io::savePCDFileBinaryCompressed("./data/lio.pcd", *global_map);
+    std::string save_dir = map::map_path.empty() ? "./data" : map::map_path;
+    std::filesystem::create_directories(save_dir);
+    const std::filesystem::path save_path = std::filesystem::path(save_dir) / "lio.pcd";
+    pcl::io::savePCDFileBinaryCompressed(save_path.string(), *global_map);
 
-    LOG(INFO) << "lio map is saved to ./data/lio.pcd";
+    LOG(INFO) << "lio map is saved to " << save_path.string();
 }
 
 CloudPtr LaserMapping::GetRecentCloud() {
@@ -903,8 +921,14 @@ CloudPtr LaserMapping::GetRecentCloud() {
 
 
 CloudPtr LaserMapping::GetProjCloud() {
-    auto cloud = scan_undistort_;
-    ProjectKFs(cloud);
+    if (scan_undistort_ == nullptr) {
+        return nullptr;
+    }
+
+    CloudPtr cloud(new PointCloudType(*scan_undistort_));
+    if (options_.proj_kfs_) {
+        ProjectKFs(cloud);
+    }
     return cloud;
 }
 

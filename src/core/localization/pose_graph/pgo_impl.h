@@ -12,6 +12,7 @@
 #include "common/constant.h"
 #include "common/eigen_types.h"
 #include "common/nav_state.h"
+#include "common/options.h"
 #include "common/timed_pose.h"
 #include "core/graph/optimizer.h"
 #include "core/localization/localization_result.h"
@@ -48,7 +49,7 @@ struct PGOFrame {
 
     // 激光定位观测 | 提供绝对约束
     bool lidar_loc_set_ = false;                         // lidarLoc是否已经设置（PGO由lodarLoc触发，正常是有效的）
-    bool lidar_loc_valid_ = false;                       // lidarLoc是否有效（只要设置了就有效）
+    bool lidar_loc_valid_ = false;                       // lidarLoc本帧地图匹配是否有效
     bool lidar_loc_inlier_ = true;                       // lidarLoc在PGO看来是否为inlier
     SE3 lidar_loc_pose_;                                 // lidarLoc定位观测
     double lidar_loc_delta_t_ = 0;                       // 插值时，bestmatch相对于上一帧lidarLoc消息的时延
@@ -104,18 +105,18 @@ struct PGOImpl {
         static constexpr double PGO_DISTANCE_TH_LAST_FRAMES = 2.5;             // PGO 滑窗时，最近两帧的最小距离
         static constexpr double PGO_ANGLE_TH_LAST_FRAMES = 10 * M_PI / 360.0;  // PGO 滑窗时，最近两帧的最小角度
 
-        double lidar_loc_pos_noise = 0.3;                             // lidar定位位置噪声 // 0.3
-        double lidar_loc_ang_noise = 1.0 * constant::kDEG2RAD;        // lidar定位角度噪声
-        double lidar_loc_outlier_th = 30.0;                           // lidar定位异常阈值
-        double lidar_odom_pos_noise = 0.3;                            // LidarOdom相对定位位置噪声
-        double lidar_odom_ang_noise = 1.0 * constant::kDEG2RAD;       // LidarOdom相对定位角度噪声
-        double lidar_odom_outlier_th = 0.01;                          // LidarOdom异常值检测
-        double dr_pos_noise = 1.0;                                    // DR相对定位位置噪声 // 0.05
-        double dr_ang_noise = 0.5 * constant::kDEG2RAD;               // DR相对定位角度噪声
-        double dr_pos_noise_ratio = 1.0;                              // DR位置噪声倍率
-        double pgo_frame_converge_pos_th = 0.05;                      // PGO帧位置收敛阈值
-        double pgo_frame_converge_ang_th = 1.0 * constant::kDEG2RAD;  // PGO帧姿态收敛阈值
-        double pgo_smooth_factor = 0.01;                              // PGO帧平滑因子
+        double lidar_loc_pos_noise = ::lightning::pgo::lidar_loc_pos_noise;        // lidar定位位置噪声
+        double lidar_loc_ang_noise = ::lightning::pgo::lidar_loc_ang_noise;        // lidar定位角度噪声
+        double lidar_loc_outlier_th = ::lightning::pgo::lidar_loc_outlier_th;      // lidar定位异常阈值
+        double lidar_odom_pos_noise = ::lightning::pgo::lidar_odom_pos_noise;      // LidarOdom相对定位位置噪声
+        double lidar_odom_ang_noise = ::lightning::pgo::lidar_odom_ang_noise;      // LidarOdom相对定位角度噪声
+        double lidar_odom_outlier_th = ::lightning::pgo::lidar_odom_outlier_th;    // LidarOdom异常值检测
+        double dr_pos_noise = ::lightning::pgo::dr_pos_noise;                      // DR相对定位位置噪声
+        double dr_ang_noise = ::lightning::pgo::dr_ang_noise;                      // DR相对定位角度噪声
+        double dr_pos_noise_ratio = ::lightning::pgo::dr_pos_noise_ratio;          // DR位置噪声倍率
+        double pgo_frame_converge_pos_th = ::lightning::pgo::pgo_frame_converge_pos_th;  // PGO帧位置收敛阈值
+        double pgo_frame_converge_ang_th = ::lightning::pgo::pgo_frame_converge_ang_th;  // PGO帧姿态收敛阈值
+        double pgo_smooth_factor = ::lightning::pgo::pgo_smooth_factor;            // PGO帧平滑因子
     };
 
     PGOImpl(Options options = {});
