@@ -3,7 +3,6 @@
 
 #include <pcl/filters/voxel_grid.h>
 #include <condition_variable>
-#include <sensor_msgs/msg/point_cloud2.hpp>
 #include <thread>
 
 #include "common/eigen_types.h"
@@ -13,9 +12,6 @@
 #include "core/ivox3d/ivox3d.h"
 #include "core/lio/eskf.hpp"
 #include "core/lio/imu_processing.hpp"
-#include "pointcloud_preprocess.h"
-
-#include "livox_ros_driver2/msg/custom_msg.hpp"
 
 namespace lightning {
 
@@ -66,14 +62,7 @@ class LaserMapping {
 
     bool Run();
 
-    // callbacks of lidar and imu
-    /// 处理ROS2的点云
-    void ProcessPointCloud2(const sensor_msgs::msg::PointCloud2::SharedPtr &msg);
-
-    /// 处理livox的点云
-    void ProcessPointCloud2(const livox_ros_driver2::msg::CustomMsg::SharedPtr &msg);
-
-    /// 如果已经做了预处理，也可以直接处理点云
+    // Input has already been standardized by PointCloudPreprocess.
     void ProcessPointCloud2(CloudPtr cloud);
 
     void ProcessIMU(const lightning::IMUPtr &msg_in);
@@ -147,9 +136,8 @@ class LaserMapping {
 
     /// modules
     IVoxType::Options ivox_options_;
-    std::shared_ptr<IVoxType> ivox_ = nullptr;                    // localmap in ivox
-    std::shared_ptr<PointCloudPreprocess> preprocess_ = nullptr;  // point cloud preprocess
-    std::shared_ptr<ImuProcess> p_imu_ = nullptr;                 // imu process
+    std::shared_ptr<IVoxType> ivox_ = nullptr;     // localmap in ivox
+    std::shared_ptr<ImuProcess> p_imu_ = nullptr;  // imu process
 
     /// local map related
     double filter_size_map_min_ = 0;

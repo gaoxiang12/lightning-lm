@@ -14,9 +14,9 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include "common/keyframe.h"
+#include "common/imu.h"
 #include "common/nav_state.h"
 #include "common/options.h"
-#include "livox_ros_driver2/msg/custom_msg.hpp"
 
 class ImageProjection;
 class FeatureExtraction;
@@ -47,16 +47,21 @@ class LioSamMapping {
     bool Init(const std::string& config_yaml);
     bool Run();
 
-    void ProcessIMU(const sensor_msgs::msg::Imu::SharedPtr& imu);
-    void ProcessPointCloud2(const sensor_msgs::msg::PointCloud2::SharedPtr& msg);
-    void ProcessPointCloud2(const livox_ros_driver2::msg::CustomMsg::SharedPtr& msg);
+    void ProcessIMU(const IMUPtr& imu);
+    void ProcessPointCloud2(CloudPtr cloud);
 
     void SetUI(std::shared_ptr<ui::PangolinWindow> ui) { ui_ = std::move(ui); }
 
     Keyframe::Ptr GetKeyframe() const { return last_kf_; }
     std::vector<Keyframe::Ptr> GetAllKeyframes() const { return all_keyframes_; }
     NavState GetState() const { return state_; }
+    NavState GetIMUState() const {
+        NavState state;
+        state.pose_is_ok_ = false;
+        return state;
+    }
     CloudPtr GetScanUndist() const { return scan_undistort_; }
+    CloudPtr GetProjCloud() const { return scan_undistort_; }
     CloudPtr GetRecentCloud() const { return recent_cloud_; }
     CloudPtr GetGlobalMap(bool use_lio_pose, bool use_voxel = true, float res = 0.1);
 

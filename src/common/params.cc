@@ -71,10 +71,6 @@ Params::Params(const std::string& yaml_path) {
 
         lidar_T_wrt_IMU = math::VecFromArray<double>(extrinT);
         lidar_R_wrt_IMU = math::MatFromArray<double>(extrinR);
-        // 调试打印0328
-
-	LOG(INFO) << "init lidar_T_wrt_IMU: " << lidar_T_wrt_IMU.transpose();
-	LOG(INFO) << "init lidar_R_wrt_IMU:\n" << lidar_R_wrt_IMU;
 
         auto Tol_eig = math::Mat4FromArray<double>(Tol_ini);
         SE3 Tol = SE3(Eigen::Quaterniond(Tol_eig.block<3, 3>(0, 0)).normalized(), Tol_eig.block<3, 1>(0, 3));

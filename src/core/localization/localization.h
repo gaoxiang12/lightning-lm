@@ -1,14 +1,11 @@
 #pragma once
 
-#include <functional>
-#include <memory>
-#include <mutex>
-
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "std_msgs/msg/int32.hpp"
 
 #include "common/imu.h"
 #include "core/lio/laser_mapping.h"
+#include "core/lio/lio_sam/lio_sam_mapping.h"
 #include "core/localization/localization_result.h"
 #include "core/system/async_message_process.h"
 
@@ -59,8 +56,6 @@ class Localization {
     /// 处理lidar消息
     void ProcessLidarMsg(const sensor_msgs::msg::PointCloud2::SharedPtr laser_msg);
     void ProcessLivoxLidarMsg(const livox_ros_driver2::msg::CustomMsg::SharedPtr laser_msg);
-    void ProcessDualLidarPointCloudPair(const sensor_msgs::msg::PointCloud2::SharedPtr& front_msg,
-                                        const sensor_msgs::msg::PointCloud2::SharedPtr& rear_msg);
 
     /// 处理IMU消息
     void ProcessIMUMsg(IMUPtr imu);
@@ -78,12 +73,16 @@ class Localization {
     void Finish();
 
     /// 异步处理函数
-    using TFCallback = std::function<void(const LocalizationResult& res)>;
+    void LidarOdomProcCloud(CloudPtr);
+    void LidarLocProcCloud(CloudPtr);
+
+    using TFCallback = std::function<void(const geometry_msgs::msg::TransformStamped& odom)>;
     using LocStateCallback = std::function<void(const std_msgs::msg::Int32& state)>;
     using PointcloudBodyCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
     using PointcloudWorldCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
 
     void SetTFCallback(TFCallback&& callback);
+
     // void SetPathCallback(std::function<void(const nav_msgs::msg::Path& path)>&& callback);
     // void SetPointcloudWorldCallback(std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>&& callback);
     // void SetPointcloudBodyCallback(std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>&& callback);
@@ -91,16 +90,6 @@ class Localization {
     // void SetHealthDiagNormalCallback(interface::health_diag_normal_callback&& callback);
 
    private:
-    void LidarOdomProcCloud(CloudPtr cloud);
-    void LidarLocProcCloud(CloudPtr scan);
-
-    void ProcessDualLidarLocalizationPair(const sensor_msgs::msg::PointCloud2::SharedPtr& front_msg,
-                                          const sensor_msgs::msg::PointCloud2::SharedPtr& rear_msg);
-    CloudPtr BuildVirtualFrontCloud(const CloudPtr& front_cloud,
-                                    const CloudPtr& rear_cloud,
-                                    double front_time,
-                                    double rear_time) const;
-
     /// 模块  ========================================================================================================
     std::mutex global_mutex_;  // 防止处理过程中被重复init
     Options options_;
@@ -109,7 +98,9 @@ class Localization {
     std::shared_ptr<PointCloudPreprocess> preprocess_ = nullptr;  // point cloud preprocess
 
     /// 前端
+    bool use_lio_sam_ = false;
     std::shared_ptr<LaserMapping> lio_ = nullptr;
+    std::shared_ptr<LioSamMapping> lio_sam_ = nullptr;
     Keyframe::Ptr lio_kf_ = nullptr;
 
     // ui
@@ -120,15 +111,9 @@ class Localization {
 
     // lidar localization
     std::shared_ptr<LidarLoc> lidar_loc_;
-    int lidar_count_ = 1;
-    PointCloudPreprocess front_lidar_preprocess_;
-    PointCloudPreprocess rear_lidar_preprocess_;
-    // p_front = T_front_rear * p_rear.
-    SE3 T_front_rear_;
-    bool allow_single_lidar_fallback_ = true;
-    sys::AsyncMessageProcess<CloudPtr> lidar_odom_proc_cloud_;
 
     /// TODO async 处理
+    sys::AsyncMessageProcess<CloudPtr> lidar_odom_proc_cloud_;  // lidar odom 处理点云
     sys::AsyncMessageProcess<CloudPtr> lidar_loc_proc_cloud_;   // lidar loc 处理点云
 
     /// 结果数据 =====================================================================================================

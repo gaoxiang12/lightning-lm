@@ -12,53 +12,53 @@ namespace lightning::loc {
 
 /**
  * Pose Graph Optimization
- * »ùÓÚ Pose Graph µÄ¶àÔ´ĞÅÏ¢ÈÚºÏ¡£
+ * åŸºäº Pose Graph çš„å¤šæºä¿¡æ¯èåˆã€‚
  *
- * ÊäÈë£º
- * -- DR£¬ĞèÒª½µµÍ¶Ô´ËµÄÒÀÀµ£¨ÂÖËÙÊ§Ğ§case½Ï¶à£©£¬¼æÈİÃ»ÓĞDR
- * -- LiDAR Odom£¬ÆµÂÊ¿ÉÄÜ²»¸ß£¬±ÈÈç5Hz£»lidarOdomÓ¦¸ÃÌá¹©×Ô¼ºµÄhessian¾ØÕóµÄPCA·ÖÎö£¬Ìá¹©ÍË»¯Çé¿ö²Î¿¼
- * -- LiDAR Loc£¬ÆµÂÊ¿ÉÄÜÒ²²»¸ß£¬¿É¶¯Ì¬ÅäÖÃ
+ * è¾“å…¥ï¼š
+ * -- DRï¼Œéœ€è¦é™ä½å¯¹æ­¤çš„ä¾èµ–ï¼ˆè½®é€Ÿå¤±æ•ˆcaseè¾ƒå¤šï¼‰ï¼Œå…¼å®¹æ²¡æœ‰DR
+ * -- LiDAR Odomï¼Œé¢‘ç‡å¯èƒ½ä¸é«˜ï¼Œæ¯”å¦‚5Hzï¼›lidarOdomåº”è¯¥æä¾›è‡ªå·±çš„hessiançŸ©é˜µçš„PCAåˆ†æï¼Œæä¾›é€€åŒ–æƒ…å†µå‚è€ƒ
+ * -- LiDAR Locï¼Œé¢‘ç‡å¯èƒ½ä¹Ÿä¸é«˜ï¼Œå¯åŠ¨æ€é…ç½®
  *
- * Êä³ö£º
- * -- ÈÚºÏ¶¨Î»½á¹û£¬ÓëIMUÍ¬ÆµÂÊ·¢²¼
- * -- ÅĞ¶Ï¸÷¸öĞÅÏ¢Ô´µÄoutlier£¬²¢ÌŞ³ıÖ®
- * -- Ã¤×ßÒ»¶ÎÊ±¼äÎó²î¿ØÖÆÔÚÈİĞí·¶Î§ÄÚ
+ * è¾“å‡ºï¼š
+ * -- èåˆå®šä½ç»“æœï¼Œä¸IMUåŒé¢‘ç‡å‘å¸ƒ
+ * -- åˆ¤æ–­å„ä¸ªä¿¡æ¯æºçš„outlierï¼Œå¹¶å‰”é™¤ä¹‹
+ * -- ç›²èµ°ä¸€æ®µæ—¶é—´è¯¯å·®æ§åˆ¶åœ¨å®¹è®¸èŒƒå›´å†…
  *
- * µ÷ÓÃ£º
- * -- Íâ²¿¿ÉÒÔµ÷ÓÃËùÓĞ½Ó¿ÚÈûÊı¾İºÍ»ñÈ¡½á¹û£¬ÊÇ¶àÏß³Ì°²È«µÄ£»
- * -- µ«ÄÚ²¿Ö»ÓĞÒ»¸öÏß³Ì£¬²»±£Ö¤Ò»¶¨²»×èÈû£¬Íâ²¿Ó¦µ±handleÕâÖÖÇé¿ö¡£
+ * è°ƒç”¨ï¼š
+ * -- å¤–éƒ¨å¯ä»¥è°ƒç”¨æ‰€æœ‰æ¥å£å¡æ•°æ®å’Œè·å–ç»“æœï¼Œæ˜¯å¤šçº¿ç¨‹å®‰å…¨çš„ï¼›
+ * -- ä½†å†…éƒ¨åªæœ‰ä¸€ä¸ªçº¿ç¨‹ï¼Œä¸ä¿è¯ä¸€å®šä¸é˜»å¡ï¼Œå¤–éƒ¨åº”å½“handleè¿™ç§æƒ…å†µã€‚
  */
 class PGO {
    public:
     PGO();
     ~PGO();
 
-    /// ÏòÍâÊä³öÈ«¾Ö¶¨Î»½á¹û
+    /// å‘å¤–è¾“å‡ºå…¨å±€å®šä½ç»“æœ
     using GlobalOutputHandleFunction = std::function<void(const LocalizationResult& output_result)>;
     void SetGlobalOutputHandleFunction(GlobalOutputHandleFunction handle);
     void SetHighFrequencyGlobalOutputHandleFunction(GlobalOutputHandleFunction handle);
 
-    /// ´¦ÀílidarOdomĞÅÏ¢
+    /// å¤„ç†lidarOdomä¿¡æ¯
     bool ProcessDR(const NavState& dr_result);
 
-    /// ´¦ÀílidarOdomĞÅÏ¢
+    /// å¤„ç†lidarOdomä¿¡æ¯
     bool ProcessLidarOdom(const NavState& lio_result);
 
-    /// ½ÓÊÕ¼¤¹â¶¨Î»ĞÅÏ¢£¨´¥·¢PGOÓÅ»¯£©
+    /// æ¥æ”¶æ¿€å…‰å®šä½ä¿¡æ¯ï¼ˆè§¦å‘PGOä¼˜åŒ–ï¼‰
     bool ProcessLidarLoc(const LocalizationResult& loc_result);
 
-    /// ´¦ÀíÍâ²¿×é×°ºÃµÄÒ»¸öPGO frame£¬½«´¥·¢ÓÅ»¯£¨½öÔÚµ¥²âÊ±Íâ²¿Ö±½Óµ÷ÓÃ£©
+    /// å¤„ç†å¤–éƒ¨ç»„è£…å¥½çš„ä¸€ä¸ªPGO frameï¼Œå°†è§¦å‘ä¼˜åŒ–ï¼ˆä»…åœ¨å•æµ‹æ—¶å¤–éƒ¨ç›´æ¥è°ƒç”¨ï¼‰
     bool ProcessPGOFrame(std::shared_ptr<PGOFrame> frame);
 
     std::shared_ptr<PGOFrame> GetCurrentPGOFrame() const;
 
-    // ¸ßÆµ²éÑ¯¶¨Î»£¬Ê¹ÓÃDR×öµİÍÆ£¬¶àÏß³Ì°²È«
+    // é«˜é¢‘æŸ¥è¯¢å®šä½ï¼Œä½¿ç”¨DRåšé€’æ¨ï¼Œå¤šçº¿ç¨‹å®‰å…¨
     bool GetCurrentLocalization() const;
 
-    /// ÖØÖÃPGO
+    /// é‡ç½®PGO
     bool Reset();
 
-    /// ÏòÍâ·¢²¼Î»×Ë
+    /// å‘å¤–å‘å¸ƒä½å§¿
     void PubResult();
 
     /// debug stuffs
@@ -66,8 +66,8 @@ class PGO {
     void LogWindowState();
 
    public:
-    bool localization_unusual_tag_ = false;  // ¶¨Î»Ê§Ğ§±êÖ¾Î»
-    bool imu_interruption_tag_ = false;      // imu¶ÏÁ÷±êÖ¾Î»
+    bool localization_unusual_tag_ = false;  // å®šä½å¤±æ•ˆæ ‡å¿—ä½
+    bool imu_interruption_tag_ = false;      // imuæ–­æµæ ‡å¿—ä½
 
    private:
     inline bool RelativePoseQueueEmpty() {
@@ -75,19 +75,19 @@ class PGO {
     }
 
     /**
-     * Îªµ±Ç°¶¨Î»½á¹û¾¡¿ÉÄÜÊµÊ±µØÍâÍÆÎ»×Ë£¬¿¼ÂÇLOºÍDRÁ½¸öĞÅÏ¢Ô´
-     * ÔÚµ±Ç°¼¤¹â¶¨Î»µÄ»ù´¡Ö®ÉÏ£¬ÏÈÓÃLO½øĞĞÍâÍÆ£¬ÔÙÓÃDR½øĞĞÍâÍÆ
+     * ä¸ºå½“å‰å®šä½ç»“æœå°½å¯èƒ½å®æ—¶åœ°å¤–æ¨ä½å§¿ï¼Œè€ƒè™‘LOå’ŒDRä¸¤ä¸ªä¿¡æ¯æº
+     * åœ¨å½“å‰æ¿€å…‰å®šä½çš„åŸºç¡€ä¹‹ä¸Šï¼Œå…ˆç”¨LOè¿›è¡Œå¤–æ¨ï¼Œå†ç”¨DRè¿›è¡Œå¤–æ¨
      *
-     * Í¬Ê±ºÍ×ÔÉíÍâÍÆ×öĞ£Ñé£¬·ÀÖ¹DRµÄÒì³£
+     * åŒæ—¶å’Œè‡ªèº«å¤–æ¨åšæ ¡éªŒï¼Œé˜²æ­¢DRçš„å¼‚å¸¸
      *
-     * @param @in/out output_result µ±Ç°ÈÚºÏ¶¨Î»½á¹û£¨¼¤¹â¶¨Î»Ê±¼ä£©
+     * @param @in/out output_result å½“å‰èåˆå®šä½ç»“æœï¼ˆæ¿€å…‰å®šä½æ—¶é—´ï¼‰
      * @return
      */
     bool ExtrapolateLocResult(LocalizationResult& output_result);
 
     std::unique_ptr<PGOImpl> impl_;
 
-    // ÔÚ±¾²ã·ÅÒ»¸öextrapolator£¬±»Èı¸öµØ·½·ÃÎÊ£ºDR£¬lidarOdom£¬LidarLoc£¬RTK
+    // åœ¨æœ¬å±‚æ”¾ä¸€ä¸ªextrapolatorï¼Œè¢«ä¸‰ä¸ªåœ°æ–¹è®¿é—®ï¼šDRï¼ŒlidarOdomï¼ŒLidarLocï¼ŒRTK
     std::unique_ptr<PoseExtrapolator> pose_extrapolator_;
     std::function<void(const LocalizationResult& output_result)> high_freq_output_func_;
     LocalizationResult high_freq_result_;
@@ -95,11 +95,11 @@ class PGO {
 
     std::shared_ptr<PoseSmoother> smoother_;
 
-    float imu_interruption_time_thd_ = 1.0;  // imuÊı¾İ¶ÏÁ÷Ê±¼äãĞÖµ s
-    float lidar_loc_score_thd_ = 0.5;        // ¼¤¹â¶¨Î»·ÖÖµãĞÖµ
-    int localization_unusual_thd_ = 10;      // ¼¤¹â¶¨Î»Ê§Ğ§´ÎÊıãĞÖµ
-    int localization_unusual_count_ = 0;     // ¶¨Î»Òì³£´ÎÊı
-    double last_lidar_loc_time_ = 0.;        // ÉÏ´Î¼¤¹â¶¨Î»Ê±¼ä´Á
+    float imu_interruption_time_thd_ = 1.0;  // imuæ•°æ®æ–­æµæ—¶é—´é˜ˆå€¼ s
+    float lidar_loc_score_thd_ = 0.5;        // æ¿€å…‰å®šä½åˆ†å€¼é˜ˆå€¼
+    int localization_unusual_thd_ = 10;      // æ¿€å…‰å®šä½å¤±æ•ˆæ¬¡æ•°é˜ˆå€¼
+    int localization_unusual_count_ = 0;     // å®šä½å¼‚å¸¸æ¬¡æ•°
+    double last_lidar_loc_time_ = 0.;        // ä¸Šæ¬¡æ¿€å…‰å®šä½æ—¶é—´æˆ³
     bool is_parking_ = false;
 };
 

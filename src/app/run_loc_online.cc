@@ -27,6 +27,8 @@ int main(int argc, char** argv) {
 
     if (!loc.Init(FLAGS_config)) {
         LOG(ERROR) << "failed to init loc";
+        rclcpp::shutdown();
+        return -1;
     }
 
     /// 默认起点开始定位

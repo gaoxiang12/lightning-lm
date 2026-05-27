@@ -6,7 +6,6 @@
 #include "core/lightning_math.hpp"
 #include "laser_mapping.h"
 
-#include <filesystem>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -18,7 +17,6 @@ namespace lightning {
 
 bool LaserMapping::Init(const std::string &config_yaml) {
     LOG(INFO) << "init laser mapping from " << config_yaml;
-    LOG(INFO) << "build version, 2026-0401-1103 ... ";    
     if (!LoadParamsFromYAML(config_yaml)) {
         return false;
     }
@@ -39,15 +37,12 @@ bool LaserMapping::Init(const std::string &config_yaml) {
 
 bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
     // get params from yaml
-    int lidar_type, ivox_nearby_type;
+    int ivox_nearby_type;
     double gyr_cov, acc_cov, b_gyr_cov, b_acc_cov;
     double filter_size_scan;
 
     auto yaml = YAML::LoadFile(yaml_file);
     try {
-        if (yaml["system"]["map_path"]) {
-            map::map_path = yaml["system"]["map_path"].as<std::string>();
-        }
         fasterlio::NUM_MAX_ITERATIONS = yaml["fasterlio"]["max_iteration"].as<int>();
         fasterlio::ESTI_PLANE_THRESHOLD = yaml["fasterlio"]["esti_plane_threshold"].as<float>();
 
@@ -58,11 +53,6 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
         acc_cov = yaml["fasterlio"]["acc_cov"].as<float>();
         b_gyr_cov = yaml["fasterlio"]["b_gyr_cov"].as<float>();
         b_acc_cov = yaml["fasterlio"]["b_acc_cov"].as<float>();
-        preprocess_->Blind() = yaml["fasterlio"]["blind"].as<double>();
-        preprocess_->TimeScale() = yaml["fasterlio"]["time_scale"].as<double>();
-        lidar_type = yaml["fasterlio"]["lidar_type"].as<int>();
-        preprocess_->NumScans() = yaml["fasterlio"]["scan_line"].as<int>();
-        preprocess_->PointFilterNum() = yaml["fasterlio"]["point_filter_num"].as<int>();
 
         extrinT_ = yaml["fasterlio"]["extrinsic_T"].as<std::vector<double>>();
         extrinR_ = yaml["fasterlio"]["extrinsic_R"].as<std::vector<double>>();
@@ -73,11 +63,6 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
 
         skip_lidar_num_ = yaml["fasterlio"]["skip_lidar_num"].as<int>();
         enable_skip_lidar_ = skip_lidar_num_ > 0;
-
-        float height_max = yaml["roi"]["height_max"].as<float>();
-        float height_min = yaml["roi"]["height_min"].as<float>();
-
-        preprocess_->SetHeightROI(height_max, height_min);
 
         options_.kf_dis_th_ = yaml["fasterlio"]["kf_dis_th"].as<double>();
         options_.kf_angle_th_ = yaml["fasterlio"]["kf_angle_th"].as<double>() * M_PI / 180.0;
@@ -91,24 +76,6 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
 
     } catch (...) {
         LOG(ERROR) << "bad conversion";
-        return false;
-    }
-
-    LOG(INFO) << "lidar_type " << lidar_type;
-    if (lidar_type == 1) {
-        preprocess_->SetLidarType(LidarType::AVIA);
-        LOG(INFO) << "Using AVIA Lidar";
-    } else if (lidar_type == 2) {
-        preprocess_->SetLidarType(LidarType::VELO32);
-        LOG(INFO) << "Using Velodyne 32 Lidar";
-    } else if (lidar_type == 3) {
-        preprocess_->SetLidarType(LidarType::OUST64);
-        LOG(INFO) << "Using OUST 64 Lidar";
-    } else if (lidar_type == 4) {
-        preprocess_->SetLidarType(LidarType::ROBOSENSE);
-        LOG(INFO) << "Using RoboSense Lidar";
-    } else {
-        LOG(WARNING) << "unknown lidar_type";
         return false;
     }
 
@@ -139,7 +106,6 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
 }
 
 LaserMapping::LaserMapping(Options options) : options_(options) {
-    preprocess_.reset(new PointCloudPreprocess());
     p_imu_.reset(new ImuProcess());
 }
 
@@ -239,14 +205,6 @@ bool LaserMapping::Run() {
 
     int cur_pts = scan_down_body_->size();
 
-    //调试打印0328
-    LOG(INFO) << "[DBG][downsample] frame=" << scan_count_
-          << " undistort_size=" << (scan_undistort_ ? scan_undistort_->size() : 0)
-          << " down_body_size=" << scan_down_body_->size()
-          << " map_grids=" << (ivox_ ? ivox_->NumValidGrids() : 0);    
-    
-
-
     if (cur_pts < (scan_undistort_->size() * 0.1) || cur_pts < options_.min_pts) {
         /// 降采样太狠了,有效点数不够，用0.1分辨率代替
         // LOG(INFO) << "too few points, using 0.1 resol";
@@ -258,7 +216,6 @@ bool LaserMapping::Run() {
         // LOG(INFO) << "Now pts: " << scan_down_body_->size() << ", before: " << cur_pts;
         cur_pts = scan_down_body_->size();
     }
-
 
     if (cur_pts < 5) {
         LOG(WARNING) << "Too few points, skip this scan!" << scan_undistort_->size() << ", " << scan_down_body_->size();
@@ -287,9 +244,7 @@ bool LaserMapping::Run() {
     const double delta_rotation_deg = (pred_state.rot_.inverse() * state_point_.rot_).log().norm() * 180.0 / M_PI;
     const double delta_velocity = (pred_state.vel_ - state_point_.vel_).norm();
 
-
     const double current_speed = state_point_.vel_.norm();
-
 
     LOG(INFO) << "[ mapping ]: In num: " << scan_undistort_->points.size() << " down " << cur_pts
               << " Map grid num: " << ivox_->NumValidGrids() << " effect num : " << effect_feat_surf_ << ", "
@@ -351,9 +306,6 @@ void LaserMapping::ProjectKFs(CloudPtr cloud, int size_limit) {
     pose_cur = pose_cur.inverse();
 
     for (auto kf : proj_kfs_) {
-        if (kf == nullptr || kf->GetCloud() == scan_undistort_) {
-            continue;
-        }
         // LOG(INFO) << "projecting kf: " << kf->GetID();
         // if (last_kf_) {
         // auto kf = last_kf_;
@@ -393,7 +345,6 @@ void LaserMapping::MakeKF() {
 
     kf->SetState(state_point_);
 
-
     LOG(INFO) << "LIO: create kf " << kf->GetID() << ", state: " << state_point_.pos_.transpose()
               << ", kf opt pose: " << kf->GetOptPose().translation().transpose()
               << ", lio pose: " << kf->GetLIOPose().translation().transpose() << ", time: " << std::setprecision(14)
@@ -429,63 +380,6 @@ void LaserMapping::MakeKF() {
     // }
 }
 
-void LaserMapping::ProcessPointCloud2(const sensor_msgs::msg::PointCloud2::SharedPtr &msg) {
-    UL lock(mtx_buffer_);
-    Timer::Evaluate(
-        [&, this]() {
-            scan_count_++;
-            double timestamp = ToSec(msg->header.stamp);
-            if (timestamp < last_timestamp_lidar_) {
-
-                LOG(ERROR) << "lidar loop back, dt: " << timestamp - last_timestamp_lidar_;
-                return;
-
-            }
-
-            LOG(INFO) << "get cloud at " << std::setprecision(14) << timestamp
-                      << ", latest imu: " << last_timestamp_imu_;
-
-            CloudPtr cloud(new PointCloudType());
-            preprocess_->Process(msg, cloud);
-	    // 调试打印0328
-	    LOG(INFO) << "[DBG][preprocess_ros2] frame=" << scan_count_
-			  << " stamp=" << std::setprecision(14) << timestamp
-			  << " cloud_size_after_preprocess=" << cloud->size()
-			  << " latest_imu=" << last_timestamp_imu_;
-
-
-            lidar_buffer_.push_back(cloud);
-            time_buffer_.push_back(timestamp);
-            last_timestamp_lidar_ = timestamp;
-        },
-        "Preprocess (Standard)");
-}
-
-void LaserMapping::ProcessPointCloud2(const livox_ros_driver2::msg::CustomMsg::SharedPtr &msg) {
-    UL lock(mtx_buffer_);
-    Timer::Evaluate(
-        [&, this]() {
-            scan_count_++;
-            double timestamp = ToSec(msg->header.stamp);
-            if (timestamp < last_timestamp_lidar_) {
-                LOG(ERROR) << "lidar loop back, clear buffer";
-                lidar_buffer_.clear();
-                time_buffer_.clear();
-            }
-
-            // LOG(INFO) << "get cloud at " << std::setprecision(14) << timestamp
-            //           << ", latest imu: " << last_timestamp_imu_;
-
-            CloudPtr cloud(new PointCloudType());
-            preprocess_->Process(msg, cloud);
-
-            lidar_buffer_.push_back(cloud);
-            time_buffer_.push_back(timestamp);
-            last_timestamp_lidar_ = timestamp;
-        },
-        "Preprocess (Standard)");
-}
-
 void LaserMapping::ProcessPointCloud2(CloudPtr cloud) {
     UL lock(mtx_buffer_);
     Timer::Evaluate(
@@ -496,7 +390,6 @@ void LaserMapping::ProcessPointCloud2(CloudPtr cloud) {
             if (timestamp < last_timestamp_lidar_) {
                 LOG(ERROR) << "lidar loop back, clear buffer";
                 lidar_buffer_.clear();
-                time_buffer_.clear();
             }
 
             lidar_buffer_.push_back(cloud);
@@ -516,14 +409,6 @@ bool LaserMapping::SyncPackages() {
     if (!lidar_pushed_) {
         measures_.scan_ = lidar_buffer_.front();
         measures_.lidar_begin_time_ = time_buffer_.front();
-
-        if (measures_.scan_ == nullptr || measures_.scan_->points.empty()) {
-            LOG(WARNING) << "Empty input point cloud, drop scan";
-            lidar_buffer_.pop_front();
-            time_buffer_.pop_front();
-            lidar_pushed_ = false;
-            return false;
-        }
 
         if (measures_.scan_->points.size() <= 1) {
             LOG(WARNING) << "Too few input point cloud!";
@@ -573,9 +458,7 @@ bool LaserMapping::SyncPackages() {
     lidar_buffer_.pop_front();
     time_buffer_.pop_front();
     lidar_pushed_ = false;
-    // 调试打印0327
-    LOG(INFO) << "scan duration used by system: "
-          << measures_.scan_->points.back().time / 1000.0 << " s";
+
     // LOG(INFO) << "sync: " << std::setprecision(14) << measures_.lidar_begin_time_ << ", " <<
     // measures_.lidar_end_time_;
 
@@ -641,14 +524,6 @@ void LaserMapping::MapIncremental() {
             ivox_->AddPoints(point_no_need_downsample);
         },
         "    IVox Add Points");
-        
-    //调试打印0328
-    LOG(INFO) << "[DBG][map_incremental] frame=" << scan_count_
-          << " points_to_add=" << points_to_add.size()
-          << " point_no_need_downsample=" << point_no_need_downsample.size()
-          << " map_pts=" << (ivox_ ? ivox_->NumPoints() : 0)
-          << " map_grids=" << (ivox_ ? ivox_->NumValidGrids() : 0);
-    
 }
 
 /**
@@ -658,7 +533,6 @@ void LaserMapping::MapIncremental() {
  * @param s kf state
  * @param ekfom_data H matrix
  */
- 
 void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
     int cnt_pts = scan_down_body_->size();
 
@@ -903,12 +777,9 @@ void LaserMapping::SaveMap() {
     /// 保存地图
     auto global_map = GetGlobalMap(true);
 
-    std::string save_dir = map::map_path.empty() ? "./data" : map::map_path;
-    std::filesystem::create_directories(save_dir);
-    const std::filesystem::path save_path = std::filesystem::path(save_dir) / "lio.pcd";
-    pcl::io::savePCDFileBinaryCompressed(save_path.string(), *global_map);
+    pcl::io::savePCDFileBinaryCompressed("./data/lio.pcd", *global_map);
 
-    LOG(INFO) << "lio map is saved to " << save_path.string();
+    LOG(INFO) << "lio map is saved to ./data/lio.pcd";
 }
 
 CloudPtr LaserMapping::GetRecentCloud() {
@@ -919,18 +790,10 @@ CloudPtr LaserMapping::GetRecentCloud() {
     return lidar_buffer_.front();
 }
 
-
 CloudPtr LaserMapping::GetProjCloud() {
-    if (scan_undistort_ == nullptr) {
-        return nullptr;
-    }
-
-    CloudPtr cloud(new PointCloudType(*scan_undistort_));
-    if (options_.proj_kfs_) {
-        ProjectKFs(cloud);
-    }
+    auto cloud = scan_undistort_;
+    ProjectKFs(cloud);
     return cloud;
 }
-
 
 }  // namespace lightning

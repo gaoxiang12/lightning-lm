@@ -7,6 +7,7 @@
 
 #include "core/g2p5/g2p5.h"
 #include "core/lio/laser_mapping.h"
+#include "core/lio/pointcloud_preprocess.h"
 #include "ui/pangolin_window.h"
 #include "wrapper/bag_io.h"
 #include "wrapper/ros_utils.h"
@@ -38,6 +39,11 @@ int main(int argc, char** argv) {
         LOG(ERROR) << "failed to init lio";
         return -1;
     };
+    PointCloudPreprocess preprocess;
+    if (!preprocess.Init(FLAGS_config)) {
+        LOG(ERROR) << "failed to init input preprocess";
+        return -1;
+    }
 
     g2p5::G2P5::Options map_opt;
     map_opt.online_mode_ = false;
@@ -53,13 +59,15 @@ int main(int argc, char** argv) {
 
     rosbag
         .AddImuHandle("imu_raw",
-                      [&lio](IMUPtr imu) {
-                          lio.ProcessIMU(imu);
+                      [&lio, &preprocess](IMUPtr imu) {
+                          lio.ProcessIMU(preprocess.process_imu(imu));
                           return true;
                       })
         .AddPointCloud2Handle("points_raw",
                               [&](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
-                                  lio.ProcessPointCloud2(cloud);
+                                  CloudPtr input(new PointCloudType);
+                                  preprocess.Process(cloud, input);
+                                  lio.ProcessPointCloud2(input);
                                   lio.Run();
 
                                   auto kf = lio.GetKeyframe();

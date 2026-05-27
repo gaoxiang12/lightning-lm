@@ -14,6 +14,7 @@ struct IMU {
     double timestamp = 0;
     Vec3d angular_velocity = Vec3d::Zero();
     Vec3d linear_acceleration = Vec3d::Zero();
+    Quatd orientation = Quatd::Identity();
 };
 
 using IMUPtr = std::shared_ptr<IMU>;

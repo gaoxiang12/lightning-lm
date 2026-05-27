@@ -4,15 +4,8 @@
 
 #include "core/system/loc_system.h"
 #include "core/localization/localization.h"
-#include "io/yaml_io.h"
 #include "wrapper/ros_utils.h"
-#include <tf2/transform_datatypes.h>
-#include <tf2_ros/buffer.h>
-#include <tf2_ros/transform_listener.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
-#include <algorithm>
-#include <cmath>
-#include <csignal>
+#include <yaml-cpp/yaml.h>
 
 namespace lightning {
 
@@ -21,34 +14,28 @@ LocSystem::LocSystem(LocSystem::Options options) : options_(options) {
     signal(SIGINT, lightning::debug::SigHandle);
 }
 
-LocSystem::~LocSystem() {
-    dual_lidar_pair_proc_.Quit();
-    loc_->Finish();
-
-}
+LocSystem::~LocSystem() { loc_->Finish(); }
 
 bool LocSystem::Init(const std::string &yaml_path) {
     loc::Localization::Options opt;
     opt.online_mode_ = true;
     loc_ = std::make_shared<loc::Localization>(opt);
 
-    YAML_IO yaml(yaml_path);
+    const YAML::Node yaml = YAML::LoadFile(yaml_path);
 
-    std::string map_path = yaml.GetValue<std::string>("system", "map_path");
+    std::string map_path = yaml["system"]["map_path"].as<std::string>();
+    options_.pub_tf_ = yaml["system"]["pub_tf"].as<bool>();
 
     LOG(INFO) << "online mode, creating ros2 node ... ";
 
     /// subscribers
     node_ = std::make_shared<rclcpp::Node>("lightning_slam");
 
-    imu_topic_ = yaml.GetValue<std::string>("common", "imu_topic");
-    cloud_topic_ = yaml.GetValue<std::string>("common", "lidar_topic");
-    livox_topic_ = yaml.GetValue<std::string>("common", "livox_lidar_topic");
-    lidar_count_ = yaml.GetValue<int>("localization", "lidar_count");
+    imu_topic_ = yaml["common"]["imu_topic"].as<std::string>();
+    cloud_topic_ = yaml["common"]["lidar_topic"].as<std::string>();
+    livox_topic_ = yaml["common"]["livox_lidar_topic"].as<std::string>();
 
     rclcpp::QoS qos(10);
-
-
 
     imu_sub_ = node_->create_subscription<sensor_msgs::msg::Imu>(
         imu_topic_, qos, [this](sensor_msgs::msg::Imu::SharedPtr msg) {
@@ -57,57 +44,22 @@ bool LocSystem::Init(const std::string &yaml_path) {
             imu->linear_acceleration =
                 Vec3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
             imu->angular_velocity = Vec3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
+            imu->orientation =
+                Quatd(msg->orientation.w, msg->orientation.x, msg->orientation.y, msg->orientation.z);
+
             ProcessIMU(imu);
         });
-    if (lidar_count_ == 1) {
-        cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
-            cloud_topic_, qos, [this](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
-                Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
-            });
 
-        livox_sub_ = node_->create_subscription<livox_ros_driver2::msg::CustomMsg>(
-            livox_topic_, qos, [this](livox_ros_driver2::msg::CustomMsg ::SharedPtr cloud) {
-                Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
-            });
-    }
-
-    if (lidar_count_ == 2) {
-        const std::string pair_cfg_name = "dual_lidar_localization";
-
-        front_lidar_topic_ = yaml.GetValue<std::string>(pair_cfg_name, "front_lidar_topic");
-        rear_lidar_topic_ = yaml.GetValue<std::string>(pair_cfg_name, "rear_lidar_topic");
-        dual_lidar_sync_tolerance_ = std::max(0.0, yaml.GetValue<double>(pair_cfg_name, "sync_tolerance"));
-        const int max_queue_size = yaml.GetValue<int>(pair_cfg_name, "max_queue_size");
-        dual_lidar_max_queue_size_ = max_queue_size > 0 ? static_cast<size_t>(max_queue_size) : 20;
-        const int pair_process_queue_size = std::max(1, yaml.GetValue<int>(pair_cfg_name, "pair_process_queue_size"));
-
-        dual_lidar_pair_proc_.SetName("dual lidar pair input");
-        dual_lidar_pair_proc_.SetMaxSize(pair_process_queue_size);
-        dual_lidar_pair_proc_.SetProcFunc([this](const TimedCloudPair& pair) {
-            if (pair.front_cloud && pair.rear_cloud) {
-                loc_->ProcessDualLidarPointCloudPair(pair.front_cloud, pair.rear_cloud);
-            }
+    cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
+        cloud_topic_, qos, [this](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
+            Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
         });
-        dual_lidar_pair_proc_.Start();
 
-        front_lidar_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
-            front_lidar_topic_, qos, [this](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
-                ProcessFrontLidar(cloud);
-            });
+    livox_sub_ = node_->create_subscription<livox_ros_driver2::msg::CustomMsg>(
+        livox_topic_, qos, [this](livox_ros_driver2::msg::CustomMsg ::SharedPtr cloud) {
+            Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
+        });
 
-        rear_lidar_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
-            rear_lidar_topic_, qos, [this](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
-                ProcessRearLidar(cloud);
-            });
-
-        LOG(INFO) << "dual lidar pair input enabled. front_topic=" << front_lidar_topic_
-                  << " rear_topic=" << rear_lidar_topic_
-                  << " sync_tolerance=" << dual_lidar_sync_tolerance_
-                  << " max_queue_size=" << dual_lidar_max_queue_size_
-                  << " pair_process_queue_size=" << pair_process_queue_size;
-        LOG(INFO) << "dual lidar localization enabled, common/lidar_topic is not subscribed";
-    }
-        
     if (options_.pub_tf_) {
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(node_);
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
@@ -117,14 +69,12 @@ bool LocSystem::Init(const std::string &yaml_path) {
             [this](const lightning::loc::LocalizationResult& pose) { PublishBaseLinkTF(pose); });
     }
 
-
-    if (!loc_->Init(yaml_path, map_path)) {
-        LOG(ERROR) << "online loc node init failed.";
-        return false;
+    bool ret = loc_->Init(yaml_path, map_path);
+    if (ret) {
+        LOG(INFO) << "online loc node has been created.";
     }
-    LOG(INFO) << "online loc node has been created.";
 
-    return true;
+    return ret;
 }
 
 void LocSystem::SetInitPose(const SE3 &pose) {
@@ -136,108 +86,21 @@ void LocSystem::SetInitPose(const SE3 &pose) {
 }
 
 void LocSystem::ProcessIMU(const IMUPtr &imu) {
-    loc_->ProcessIMUMsg(imu);
+    if (loc_started_) {
+        loc_->ProcessIMUMsg(imu);
+    }
 }
 
 void LocSystem::ProcessLidar(const sensor_msgs::msg::PointCloud2::SharedPtr &cloud) {
-    if (lidar_count_ != 1 || !loc_started_) {
-        return;
+    if (loc_started_) {
+        loc_->ProcessLidarMsg(cloud);
     }
-
-    loc_->ProcessLidarMsg(cloud);
 }
 
 void LocSystem::ProcessLidar(const livox_ros_driver2::msg::CustomMsg::SharedPtr &cloud) {
-    if (lidar_count_ != 1 || !loc_started_) {
-        return;
+    if (loc_started_) {
+        loc_->ProcessLivoxLidarMsg(cloud);
     }
-
-    loc_->ProcessLivoxLidarMsg(cloud);
-}
-
-void LocSystem::ProcessFrontLidar(const sensor_msgs::msg::PointCloud2::SharedPtr& cloud) {
-    if (!cloud) {
-        return;
-    }
-
-    if (lidar_count_ != 2 || !loc_started_) {
-        return;
-    }
-
-    TimedCloudPair pair;
-    bool has_pair = false;
-    {
-        std::lock_guard<std::mutex> lock(dual_lidar_mutex_);
-
-        front_lidar_queue_.push_back({ToSec(cloud->header.stamp), cloud});
-        while (front_lidar_queue_.size() > dual_lidar_max_queue_size_) {
-            front_lidar_queue_.pop_front();
-        }
-
-        has_pair = TryPopDualLidarPairLocked(pair);
-    }
-
-    if (has_pair) {
-        dual_lidar_pair_proc_.AddMessage(pair);
-    }
-}
-
-void LocSystem::ProcessRearLidar(const sensor_msgs::msg::PointCloud2::SharedPtr& cloud) {
-    if (!cloud) {
-        return;
-    }
-
-    if (lidar_count_ != 2 || !loc_started_) {
-        return;
-    }
-
-    TimedCloudPair pair;
-    bool has_pair = false;
-    {
-        std::lock_guard<std::mutex> lock(dual_lidar_mutex_);
-
-        rear_lidar_queue_.push_back({ToSec(cloud->header.stamp), cloud});
-        while (rear_lidar_queue_.size() > dual_lidar_max_queue_size_) {
-            rear_lidar_queue_.pop_front();
-        }
-
-        has_pair = TryPopDualLidarPairLocked(pair);
-    }
-
-    if (has_pair) {
-        dual_lidar_pair_proc_.AddMessage(pair);
-    }
-}
-
-bool LocSystem::TryPopDualLidarPairLocked(TimedCloudPair& pair) {
-    while (!front_lidar_queue_.empty() && !rear_lidar_queue_.empty()) {
-        const double dt =
-            front_lidar_queue_.front().timestamp - rear_lidar_queue_.front().timestamp;
-
-        if (std::abs(dt) <= dual_lidar_sync_tolerance_) {
-            pair.front_cloud = front_lidar_queue_.front().cloud;
-            pair.rear_cloud = rear_lidar_queue_.front().cloud;
-
-            front_lidar_queue_.pop_front();
-            rear_lidar_queue_.pop_front();
-
-            return true;
-        }
-
-        if (dt < 0.0) {
-            LOG_EVERY_N(WARNING, 100)
-                << "[DUAL_LIDAR_SYNC][DROP_FRONT] dt=" << dt
-                << " tolerance=" << dual_lidar_sync_tolerance_;
-            front_lidar_queue_.pop_front();
-        } else {
-            LOG_EVERY_N(WARNING, 100)
-                << "[DUAL_LIDAR_SYNC][DROP_REAR] dt=" << dt
-                << " tolerance=" << dual_lidar_sync_tolerance_;
-            rear_lidar_queue_.pop_front();
-        }
-    }
-
-    return false;
 }
 
 void LocSystem::Spin() {
@@ -250,8 +113,7 @@ void LocSystem::PublishBaseLinkTF(const lightning::loc::LocalizationResult& res)
     geometry_msgs::msg::TransformStamped tf_imu_base;
     /*
     try {
-        // lookupTransform(target_frame, source_frame, time) - 返回 source_frame 到 target_frame 的变换
-        // 我们需要 imu_link 到 base_link 的变换，所以 target_frame 是 base_link，source_frame 是 imu_link
+        
         tf_imu_base = tf_buffer_->lookupTransform(
             "base_link",
             "imu_link",
@@ -264,7 +126,7 @@ void LocSystem::PublishBaseLinkTF(const lightning::loc::LocalizationResult& res)
     */
     tf2::Transform T_map_imu, T_imu_base, T_map_base;
 
-    // res.pose_ 视为 map->imu_link
+    // res.pose_ ��Ϊ map->imu_link
     T_map_imu.setOrigin(tf2::Vector3(
         res.pose_.translation().x(),
         res.pose_.translation().y(),
@@ -275,8 +137,6 @@ void LocSystem::PublishBaseLinkTF(const lightning::loc::LocalizationResult& res)
 
     //tf2::fromMsg(tf_imu_base.transform, T_imu_base);
 
-    // T_map_base = T_map_imu * T_imu_base
-    // 因为 T_imu_base 是 imu_link 到 base_link 的变换
     //T_map_base = T_map_imu * T_imu_base;
     T_map_base = T_map_imu;
     geometry_msgs::msg::TransformStamped msg;

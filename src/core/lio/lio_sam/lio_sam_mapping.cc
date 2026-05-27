@@ -11,6 +11,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include "ui/pangolin_window.h"
+#include "core/lightning_math.hpp"
 #include "wrapper/ros_utils.h"
 
 // Header-only offline LIO-SAM stages: no ROS topic handoff, no included .cpp files.
@@ -28,24 +29,16 @@ void SetParamOverride(std::vector<rclcpp::Parameter>& params, const std::string&
     params.emplace_back(name, value);
 }
 
-template <typename T>
-void ReadYamlParam(const YAML::Node& node,
-                   const std::string& yaml_key,
-                   const std::string& param_name,
-                   std::vector<rclcpp::Parameter>& params) {
-    if (node && node[yaml_key]) {
-        SetParamOverride(params, param_name, node[yaml_key].as<T>());
+builtin_interfaces::msg::Time ToRosStamp(double timestamp) {
+    builtin_interfaces::msg::Time stamp;
+    const double clamped = std::max(0.0, timestamp);
+    stamp.sec = static_cast<int32_t>(std::floor(clamped));
+    stamp.nanosec = static_cast<uint32_t>(std::llround((clamped - stamp.sec) * 1e9));
+    if (stamp.nanosec >= 1000000000U) {
+        ++stamp.sec;
+        stamp.nanosec -= 1000000000U;
     }
-}
-
-std::string LidarTypeToSensorName(int lidar_type) {
-    if (lidar_type == 1) {
-        return "livox";
-    }
-    if (lidar_type == 2) {
-        return "velodyne";
-    }
-    return "ouster";
+    return stamp;
 }
 
 lightning::SO3 RpyToSO3(double roll, double pitch, double yaw) {
@@ -95,148 +88,108 @@ bool LioSamMapping::Init(const std::string& config_yaml) {
 }
 
 bool LioSamMapping::LoadParamsFromYAML(const std::string& yaml_path) {
-    YAML::Node yaml;
     try {
-        yaml = YAML::LoadFile(yaml_path);
+        const YAML::Node yaml = YAML::LoadFile(yaml_path);
+        const YAML::Node common = yaml["common"];
+        const YAML::Node params = yaml["lio_sam"];
+        if (!params) {
+            LOG(ERROR) << "lio_sam config section is missing";
+            return false;
+        }
+        std::vector<rclcpp::Parameter> overrides;
+        sensor_type_ = params["sensor"].as<std::string>();
+        std::transform(sensor_type_.begin(), sensor_type_.end(), sensor_type_.begin(), ::tolower);
+
+        SetParamOverride(overrides, "pointCloudTopic", common["lidar_topic"].as<std::string>());
+        SetParamOverride(overrides, "imuTopic", common["imu_topic"].as<std::string>());
+        SetParamOverride(overrides, "odomTopic", common["odom_topic"].as<std::string>());
+        SetParamOverride(overrides, "gpsTopic", common["gps_topic"].as<std::string>());
+        SetParamOverride(overrides, "lidarFrame", common["lidar_frame"].as<std::string>());
+        SetParamOverride(overrides, "baselinkFrame", common["base_link_frame"].as<std::string>());
+        SetParamOverride(overrides, "odometryFrame", common["odometry_frame"].as<std::string>());
+        SetParamOverride(overrides, "mapFrame", common["map_frame"].as<std::string>());
+
+        SetParamOverride(overrides, "sensor", sensor_type_);
+        SetParamOverride(overrides, "useImuHeadingInitialization", params["useImuHeadingInitialization"].as<bool>());
+        SetParamOverride(overrides, "useImuAccelRollPitchInitialization",
+                         params["useImuAccelRollPitchInitialization"].as<bool>());
+        SetParamOverride(overrides, "N_SCAN", params["N_SCAN"].as<int>());
+        SetParamOverride(overrides, "Horizon_SCAN", params["Horizon_SCAN"].as<int>());
+        SetParamOverride(overrides, "downsampleRate", params["downsampleRate"].as<int>());
+        SetParamOverride(overrides, "lidarMinRange", params["lidarMinRange"].as<double>());
+        SetParamOverride(overrides, "lidarMaxRange", params["lidarMaxRange"].as<double>());
+        SetParamOverride(overrides, "imuAccNoise", params["imuAccNoise"].as<double>());
+        SetParamOverride(overrides, "imuGyrNoise", params["imuGyrNoise"].as<double>());
+        SetParamOverride(overrides, "imuAccBiasN", params["imuAccBiasN"].as<double>());
+        SetParamOverride(overrides, "imuGyrBiasN", params["imuGyrBiasN"].as<double>());
+        SetParamOverride(overrides, "imuGravity", params["imuGravity"].as<double>());
+        SetParamOverride(overrides, "imuRPYWeight", params["imuRPYWeight"].as<double>());
+        SetParamOverride(overrides, "extrinsicTrans", params["extrinsicTrans"].as<std::vector<double>>());
+        SetParamOverride(overrides, "extrinsicRot", params["extrinsicRot"].as<std::vector<double>>());
+        SetParamOverride(overrides, "extrinsicRPY", params["extrinsicRPY"].as<std::vector<double>>());
+        SetParamOverride(overrides, "edgeThreshold", params["edgeThreshold"].as<double>());
+        SetParamOverride(overrides, "surfThreshold", params["surfThreshold"].as<double>());
+        SetParamOverride(overrides, "edgeFeatureMinValidNum", params["edgeFeatureMinValidNum"].as<int>());
+        SetParamOverride(overrides, "surfFeatureMinValidNum", params["surfFeatureMinValidNum"].as<int>());
+        SetParamOverride(overrides, "odometrySurfLeafSize", params["odometrySurfLeafSize"].as<double>());
+        SetParamOverride(overrides, "mappingCornerLeafSize", params["mappingCornerLeafSize"].as<double>());
+        SetParamOverride(overrides, "mappingSurfLeafSize", params["mappingSurfLeafSize"].as<double>());
+        SetParamOverride(overrides, "z_tollerance", params["z_tollerance"].as<double>());
+        SetParamOverride(overrides, "rotation_tollerance", params["rotation_tollerance"].as<double>());
+        SetParamOverride(overrides, "numberOfCores", params["numberOfCores"].as<int>());
+        SetParamOverride(overrides, "mappingProcessInterval", params["mappingProcessInterval"].as<double>());
+        SetParamOverride(overrides, "mappingLowSpeedMaxTranslationSpeed",
+                         params["mappingLowSpeedMaxTranslationSpeed"].as<double>());
+        SetParamOverride(overrides, "surroundingkeyframeAddingDistThreshold",
+                         params["surroundingkeyframeAddingDistThreshold"].as<double>());
+        SetParamOverride(overrides, "surroundingkeyframeAddingAngleThreshold",
+                         params["surroundingkeyframeAddingAngleThreshold"].as<double>());
+        SetParamOverride(overrides, "surroundingKeyframeDensity", params["surroundingKeyframeDensity"].as<double>());
+        SetParamOverride(overrides, "surroundingKeyframeSearchRadius",
+                         params["surroundingKeyframeSearchRadius"].as<double>());
+        SetParamOverride(overrides, "loopClosureEnableFlag",
+                         options_.is_in_slam_mode_ && params["loopClosureEnableFlag"].as<bool>());
+        SetParamOverride(overrides, "surroundingKeyframeSize", params["surroundingKeyframeSize"].as<int>());
+        SetParamOverride(overrides, "historyKeyframeSearchRadius", params["historyKeyframeSearchRadius"].as<double>());
+        SetParamOverride(overrides, "historyKeyframeSearchTimeDiff",
+                         params["historyKeyframeSearchTimeDiff"].as<double>());
+        SetParamOverride(overrides, "historyKeyframeSearchNum", params["historyKeyframeSearchNum"].as<int>());
+        SetParamOverride(overrides, "historyKeyframeFitnessScore", params["historyKeyframeFitnessScore"].as<double>());
+        SetParamOverride(overrides, "mappingMotionGateEnable", params["mappingMotionGateEnable"].as<bool>());
+        SetParamOverride(overrides, "mappingIcpFallbackEnable", params["mappingIcpFallbackEnable"].as<bool>());
+        SetParamOverride(overrides, "mappingMotionMaxSpeed", params["mappingMotionMaxSpeed"].as<double>());
+        SetParamOverride(overrides, "mappingMotionMaxAngularVelocity",
+                         params["mappingMotionMaxAngularVelocity"].as<double>());
+        SetParamOverride(overrides, "mappingMotionMaxCurvature", params["mappingMotionMaxCurvature"].as<double>());
+        SetParamOverride(overrides, "mappingMotionMaxRollPitchDeg", params["mappingMotionMaxRollPitchDeg"].as<double>());
+        SetParamOverride(overrides, "mappingFallbackIcpSkipOnBadLmMotion",
+                         params["mappingFallbackIcpSkipOnBadLmMotion"].as<bool>());
+
+        node_options_ = rclcpp::NodeOptions();
+        node_options_.use_intra_process_comms(true);
+        node_options_.parameter_overrides(overrides);
+        LOG(INFO) << "LIO-SAM params loaded: sensor=" << sensor_type_ << ", overrides=" << overrides.size();
+        return true;
     } catch (const std::exception& e) {
-        LOG(ERROR) << "failed to load yaml " << yaml_path << ": " << e.what();
+        LOG(ERROR) << "failed to load LIO-SAM params from " << yaml_path << ": " << e.what();
         return false;
     }
-
-    std::vector<rclcpp::Parameter> overrides;
-
-    const YAML::Node fasterlio = yaml["fasterlio"];
-    if (fasterlio) {
-        int lidar_type = 3;
-        if (fasterlio["lidar_type"]) {
-            lidar_type = fasterlio["lidar_type"].as<int>();
-        }
-        sensor_type_ = LidarTypeToSensorName(lidar_type);
-        SetParamOverride(overrides, "sensor", sensor_type_);
-
-        ReadYamlParam<int>(fasterlio, "scan_line", "N_SCAN", overrides);
-        ReadYamlParam<double>(fasterlio, "blind", "lidarMinRange", overrides);
-        ReadYamlParam<double>(fasterlio, "acc_cov", "imuAccNoise", overrides);
-        ReadYamlParam<double>(fasterlio, "gyr_cov", "imuGyrNoise", overrides);
-        ReadYamlParam<double>(fasterlio, "b_acc_cov", "imuAccBiasN", overrides);
-        ReadYamlParam<double>(fasterlio, "b_gyr_cov", "imuGyrBiasN", overrides);
-        ReadYamlParam<double>(fasterlio, "filter_size_scan", "odometrySurfLeafSize", overrides);
-        ReadYamlParam<double>(fasterlio, "filter_size_map", "mappingSurfLeafSize", overrides);
-        ReadYamlParam<std::vector<double>>(fasterlio, "extrinsic_T", "extrinsicTrans", overrides);
-        ReadYamlParam<std::vector<double>>(fasterlio, "extrinsic_R", "extrinsicRot", overrides);
-        ReadYamlParam<std::vector<double>>(fasterlio, "extrinsic_R", "extrinsicRPY", overrides);
-    }
-
-    YAML::Node lio_sam = yaml["lio_sam"];
-    if (!lio_sam) {
-        lio_sam = yaml["liosam"];
-    }
-    if (lio_sam) {
-        ReadYamlParam<std::string>(lio_sam, "sensor", "sensor", overrides);
-        if (lio_sam["sensor"]) {
-            sensor_type_ = lio_sam["sensor"].as<std::string>();
-            std::transform(sensor_type_.begin(), sensor_type_.end(), sensor_type_.begin(), ::tolower);
-        }
-
-        ReadYamlParam<std::string>(lio_sam, "lidarFrame", "lidarFrame", overrides);
-        ReadYamlParam<std::string>(lio_sam, "baselinkFrame", "baselinkFrame", overrides);
-        ReadYamlParam<std::string>(lio_sam, "odometryFrame", "odometryFrame", overrides);
-        ReadYamlParam<std::string>(lio_sam, "mapFrame", "mapFrame", overrides);
-
-        ReadYamlParam<bool>(lio_sam, "useImuHeadingInitialization", "useImuHeadingInitialization", overrides);
-        ReadYamlParam<bool>(lio_sam, "useImuAccelRollPitchInitialization", "useImuAccelRollPitchInitialization",
-                            overrides);
-
-        ReadYamlParam<int>(lio_sam, "N_SCAN", "N_SCAN", overrides);
-        ReadYamlParam<int>(lio_sam, "Horizon_SCAN", "Horizon_SCAN", overrides);
-        ReadYamlParam<int>(lio_sam, "downsampleRate", "downsampleRate", overrides);
-        ReadYamlParam<double>(lio_sam, "lidarMinRange", "lidarMinRange", overrides);
-        ReadYamlParam<double>(lio_sam, "lidarMaxRange", "lidarMaxRange", overrides);
-
-        ReadYamlParam<double>(lio_sam, "imuAccNoise", "imuAccNoise", overrides);
-        ReadYamlParam<double>(lio_sam, "imuGyrNoise", "imuGyrNoise", overrides);
-        ReadYamlParam<double>(lio_sam, "imuAccBiasN", "imuAccBiasN", overrides);
-        ReadYamlParam<double>(lio_sam, "imuGyrBiasN", "imuGyrBiasN", overrides);
-        ReadYamlParam<double>(lio_sam, "imuGravity", "imuGravity", overrides);
-        ReadYamlParam<double>(lio_sam, "imuRPYWeight", "imuRPYWeight", overrides);
-        ReadYamlParam<std::vector<double>>(lio_sam, "extrinsicRot", "extrinsicRot", overrides);
-        ReadYamlParam<std::vector<double>>(lio_sam, "extrinsicRPY", "extrinsicRPY", overrides);
-        ReadYamlParam<std::vector<double>>(lio_sam, "extrinsicTrans", "extrinsicTrans", overrides);
-
-        ReadYamlParam<double>(lio_sam, "edgeThreshold", "edgeThreshold", overrides);
-        ReadYamlParam<double>(lio_sam, "surfThreshold", "surfThreshold", overrides);
-        ReadYamlParam<int>(lio_sam, "edgeFeatureMinValidNum", "edgeFeatureMinValidNum", overrides);
-        ReadYamlParam<int>(lio_sam, "surfFeatureMinValidNum", "surfFeatureMinValidNum", overrides);
-        ReadYamlParam<double>(lio_sam, "odometrySurfLeafSize", "odometrySurfLeafSize", overrides);
-        ReadYamlParam<double>(lio_sam, "mappingCornerLeafSize", "mappingCornerLeafSize", overrides);
-        ReadYamlParam<double>(lio_sam, "mappingSurfLeafSize", "mappingSurfLeafSize", overrides);
-        ReadYamlParam<double>(lio_sam, "z_tollerance", "z_tollerance", overrides);
-        ReadYamlParam<double>(lio_sam, "rotation_tollerance", "rotation_tollerance", overrides);
-        ReadYamlParam<int>(lio_sam, "numberOfCores", "numberOfCores", overrides);
-        ReadYamlParam<double>(lio_sam, "mappingProcessInterval", "mappingProcessInterval", overrides);
-        ReadYamlParam<double>(lio_sam, "mappingLowSpeedMaxTranslationSpeed",
-                              "mappingLowSpeedMaxTranslationSpeed", overrides);
-        ReadYamlParam<double>(lio_sam, "surroundingkeyframeAddingDistThreshold",
-                              "surroundingkeyframeAddingDistThreshold", overrides);
-        ReadYamlParam<double>(lio_sam, "surroundingkeyframeAddingAngleThreshold",
-                              "surroundingkeyframeAddingAngleThreshold", overrides);
-        ReadYamlParam<double>(lio_sam, "surroundingKeyframeDensity", "surroundingKeyframeDensity", overrides);
-        ReadYamlParam<double>(lio_sam, "surroundingKeyframeSearchRadius", "surroundingKeyframeSearchRadius",
-                              overrides);
-        ReadYamlParam<bool>(lio_sam, "loopClosureEnableFlag", "loopClosureEnableFlag", overrides);
-        ReadYamlParam<int>(lio_sam, "surroundingKeyframeSize", "surroundingKeyframeSize", overrides);
-        ReadYamlParam<double>(lio_sam, "historyKeyframeSearchRadius", "historyKeyframeSearchRadius", overrides);
-        ReadYamlParam<double>(lio_sam, "historyKeyframeSearchTimeDiff", "historyKeyframeSearchTimeDiff",
-                              overrides);
-        ReadYamlParam<int>(lio_sam, "historyKeyframeSearchNum", "historyKeyframeSearchNum", overrides);
-        ReadYamlParam<double>(lio_sam, "historyKeyframeFitnessScore", "historyKeyframeFitnessScore", overrides);
-
-        ReadYamlParam<bool>(lio_sam, "mappingMotionGateEnable", "mappingMotionGateEnable", overrides);
-        ReadYamlParam<bool>(lio_sam, "mappingIcpFallbackEnable", "mappingIcpFallbackEnable", overrides);
-        ReadYamlParam<double>(lio_sam, "mappingMotionMaxSpeed", "mappingMotionMaxSpeed", overrides);
-        ReadYamlParam<double>(lio_sam, "mappingMotionMaxAngularVelocity", "mappingMotionMaxAngularVelocity",
-                              overrides);
-        ReadYamlParam<double>(lio_sam, "mappingMotionMaxCurvature", "mappingMotionMaxCurvature", overrides);
-        ReadYamlParam<double>(lio_sam, "mappingMotionMaxRollPitchDeg", "mappingMotionMaxRollPitchDeg", overrides);
-        ReadYamlParam<bool>(lio_sam, "mappingFallbackIcpSkipOnBadLmMotion",
-                            "mappingFallbackIcpSkipOnBadLmMotion", overrides);
-        ReadYamlParam<double>(lio_sam, "mappingFallbackIcpMaxCorrespondenceDistance",
-                              "mappingFallbackIcpMaxCorrespondenceDistance", overrides);
-        ReadYamlParam<int>(lio_sam, "mappingFallbackIcpMaxIterations", "mappingFallbackIcpMaxIterations",
-                           overrides);
-        ReadYamlParam<double>(lio_sam, "mappingFallbackIcpLeafSize", "mappingFallbackIcpLeafSize", overrides);
-        ReadYamlParam<double>(lio_sam, "mappingFallbackIcpFitnessScore", "mappingFallbackIcpFitnessScore",
-                              overrides);
-        ReadYamlParam<double>(lio_sam, "mappingFallbackIcpFitnessScoreMaxRange",
-                              "mappingFallbackIcpFitnessScoreMaxRange", overrides);
-        ReadYamlParam<int>(lio_sam, "mappingFallbackIcpMinSourcePoints", "mappingFallbackIcpMinSourcePoints",
-                           overrides);
-        ReadYamlParam<int>(lio_sam, "mappingFallbackIcpMinTargetPoints", "mappingFallbackIcpMinTargetPoints",
-                           overrides);
-        ReadYamlParam<int>(lio_sam, "mappingFallbackIcpMaxSourcePoints", "mappingFallbackIcpMaxSourcePoints",
-                           overrides);
-        ReadYamlParam<int>(lio_sam, "mappingFallbackIcpMaxTargetPoints", "mappingFallbackIcpMaxTargetPoints",
-                           overrides);
-    }
-
-    const bool has_explicit_horizon = lio_sam && lio_sam["Horizon_SCAN"];
-    if (!has_explicit_horizon && sensor_type_ == "velodyne") {
-        SetParamOverride(overrides, "Horizon_SCAN", 1800);
-    } else if (!has_explicit_horizon && sensor_type_ == "ouster") {
-        SetParamOverride(overrides, "Horizon_SCAN", 1024);
-    }
-
-    node_options_ = rclcpp::NodeOptions();
-    node_options_.use_intra_process_comms(true);
-    node_options_.parameter_overrides(overrides);
-
-    LOG(INFO) << "LIO-SAM params loaded: sensor=" << sensor_type_ << ", overrides=" << overrides.size();
-    return true;
 }
 
-void LioSamMapping::ProcessIMU(const sensor_msgs::msg::Imu::SharedPtr& imu) {
-
-    const double timestamp = ToSec(imu->header.stamp);
+void LioSamMapping::ProcessIMU(const IMUPtr& input) {
+    sensor_msgs::msg::Imu imu;
+    imu.header.stamp = ToRosStamp(input->timestamp);
+    imu.angular_velocity.x = input->angular_velocity.x();
+    imu.angular_velocity.y = input->angular_velocity.y();
+    imu.angular_velocity.z = input->angular_velocity.z();
+    imu.linear_acceleration.x = input->linear_acceleration.x();
+    imu.linear_acceleration.y = input->linear_acceleration.y();
+    imu.linear_acceleration.z = input->linear_acceleration.z();
+    imu.orientation.x = input->orientation.x();
+    imu.orientation.y = input->orientation.y();
+    imu.orientation.z = input->orientation.z();
+    imu.orientation.w = input->orientation.w();
+    const double timestamp = input->timestamp;
     std::lock_guard<std::mutex> lock(mtx_buffer_);
     if (timestamp < last_timestamp_imu_) {
         LOG(WARNING) << "lio-sam imu loop back, clear buffer";
@@ -245,12 +198,30 @@ void LioSamMapping::ProcessIMU(const sensor_msgs::msg::Imu::SharedPtr& imu) {
 
     last_timestamp_imu_ = timestamp;
     imu_count_++;
-    imu_buffer_.push_back(*imu);
+    imu_buffer_.push_back(imu);
 }
 
-void LioSamMapping::ProcessPointCloud2(const sensor_msgs::msg::PointCloud2::SharedPtr& msg) {
+void LioSamMapping::ProcessPointCloud2(CloudPtr cloud) {
+    pcl::PointCloud<::VelodynePointXYZIRT> native_cloud;
+    native_cloud.header = cloud->header;
+    native_cloud.reserve(cloud->size());
+    for (const auto& source : cloud->points) {
+        ::VelodynePointXYZIRT point;
+        point.x = source.x;
+        point.y = source.y;
+        point.z = source.z;
+        point.intensity = source.intensity;
+        point.ring = source.ring;
+        point.time = static_cast<float>(source.time * 1e-3);
+        native_cloud.push_back(point);
+    }
+    native_cloud.height = cloud->height;
+    native_cloud.width = cloud->width;
+    native_cloud.is_dense = cloud->is_dense;
+    sensor_msgs::msg::PointCloud2 msg;
+    pcl::toROSMsg(native_cloud, msg);
 
-    const double timestamp = ToSec(msg->header.stamp);
+    const double timestamp = math::ToSec(cloud->header.stamp);
     std::lock_guard<std::mutex> lock(mtx_buffer_);
     if (timestamp < last_timestamp_lidar_) {
         LOG(ERROR) << "lio-sam lidar loop back, clear buffer";
@@ -261,38 +232,11 @@ void LioSamMapping::ProcessPointCloud2(const sensor_msgs::msg::PointCloud2::Shar
     }
     scan_count_++;
     last_timestamp_lidar_ = timestamp;
-    lidar_buffer_.push_back(*msg);
+    lidar_buffer_.push_back(msg);
     time_buffer_.push_back(timestamp);
 
     LOG(INFO) << "lio-sam enqueue cloud at " << std::setprecision(14) << timestamp
               << ", latest imu: " << last_timestamp_imu_;
-}
-
-void LioSamMapping::ProcessPointCloud2(const livox_ros_driver2::msg::CustomMsg::SharedPtr& msg) {
-    if (!msg) {
-        return;
-    }
-
-    pcl::PointCloud<::PointXYZIRT> cloud;
-    cloud.reserve(msg->points.size());
-    for (const auto& src : msg->points) {
-        ::PointXYZIRT pt;
-        pt.x = src.x;
-        pt.y = src.y;
-        pt.z = src.z;
-        pt.intensity = src.reflectivity;
-        pt.ring = src.line;
-        pt.time = static_cast<float>(src.offset_time) * 1e-9f;
-        cloud.push_back(pt);
-    }
-    cloud.height = 1;
-    cloud.width = cloud.size();
-    cloud.is_dense = false;
-
-    auto ros_cloud = std::make_shared<sensor_msgs::msg::PointCloud2>();
-    pcl::toROSMsg(cloud, *ros_cloud);
-    ros_cloud->header = msg->header;
-    ProcessPointCloud2(ros_cloud);
 }
 
 bool LioSamMapping::SyncPackages() {

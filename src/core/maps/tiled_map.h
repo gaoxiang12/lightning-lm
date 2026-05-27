@@ -89,7 +89,7 @@ class TiledMap {
         float inv_voxel_size_ = 1.0;                   // 栅格尺寸倒数
         int min_pts_in_voxel_ = 3;                     // 每个栅格中最小点数
         int min_effective_pts_ = 500;                  // 最小有效点数
-        size_t capacity_ = 300000;                     // 缓存的体素数量
+        size_t capacity_ = 100000;                     // 缓存的体素数量
         int max_pts_in_voxel_ = 50;                    // 每个栅格中最大点数
 
         bool verbose_ = false;

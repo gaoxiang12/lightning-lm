@@ -51,7 +51,6 @@ class RosbagIO {
     using LivoxCloud2Handle = std::function<bool(livox_ros_driver2::msg::CustomMsg::SharedPtr)>;
     using FullPointCloudHandle = std::function<bool(FullCloudPtr)>;
     using ImuHandle = std::function<bool(IMUPtr)>;
-    using RawImuHandle = std::function<bool(sensor_msgs::msg::Imu::SharedPtr)>;
     using OdomHandle = std::function<bool(const OdomPtr &)>;
 
     /**
@@ -102,18 +101,10 @@ class RosbagIO {
                 Vec3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
             // constant::kGRAVITY;
             imu->angular_velocity = Vec3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
+            imu->orientation =
+                Quatd(msg->orientation.w, msg->orientation.x, msg->orientation.y, msg->orientation.z);
 
             return f(imu);
-        });
-    }
-
-    RosbagIO &AddImuHandle(const std::string &topic_name, RawImuHandle f) {
-        return AddHandle(topic_name, [f, this](const MsgType &m) -> bool {
-            auto msg = std::make_shared<sensor_msgs::msg::Imu>();
-            rclcpp::SerializedMessage data(*m->serialized_data);
-            seri_imu_.deserialize_message(&data, msg.get());
-
-            return f(msg);
         });
     }
 

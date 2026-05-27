@@ -5,15 +5,8 @@
 #ifndef LIGHTNING_LOC_SYSTEM_H
 #define LIGHTNING_LOC_SYSTEM_H
 
-#include <deque>
-#include <mutex>
-#include <atomic>
-
 #include <tf2_ros/transform_broadcaster.h>
-#include <tf2_ros/buffer.h>
-#include <tf2_ros/transform_listener.h>
 #include <rclcpp/rclcpp.hpp>
-#include <geometry_msgs/msg/transform_stamped.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 
@@ -22,9 +15,6 @@
 #include "common/eigen_types.h"
 #include "common/imu.h"
 #include "common/keyframe.h"
-
-#include "core/localization/localization_result.h"
-#include "core/system/async_message_process.h"
 
 namespace lightning {
 
@@ -57,24 +47,7 @@ class LocSystem {
     /// 实时模式下的spin
     void Spin();
 
-    /// 发布base_link的TF
-    void PublishBaseLinkTF(const lightning::loc::LocalizationResult& res);
-
    private:
-    struct TimedCloud {
-        double timestamp = 0.0;
-        sensor_msgs::msg::PointCloud2::SharedPtr cloud = nullptr;
-    };
-
-    struct TimedCloudPair {
-        sensor_msgs::msg::PointCloud2::SharedPtr front_cloud = nullptr;
-        sensor_msgs::msg::PointCloud2::SharedPtr rear_cloud = nullptr;
-    };
-
-    void ProcessFrontLidar(const sensor_msgs::msg::PointCloud2::SharedPtr& cloud);
-    void ProcessRearLidar(const sensor_msgs::msg::PointCloud2::SharedPtr& cloud);
-    bool TryPopDualLidarPairLocked(TimedCloudPair& pair);
-
     Options options_;
 
     std::shared_ptr<loc::Localization> loc_ = nullptr;  // 定位接口
@@ -85,33 +58,16 @@ class LocSystem {
     /// 实时模式下的ros2 node, subscribers
     rclcpp::Node::SharedPtr node_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_ = nullptr;
-    std::shared_ptr<tf2_ros::Buffer> tf_buffer_ = nullptr;
-    std::shared_ptr<tf2_ros::TransformListener> tf_listener_ = nullptr;
 
     std::string imu_topic_;
     std::string cloud_topic_;
     std::string livox_topic_;
-    int lidar_count_ = 1;
 
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_ = nullptr;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_ = nullptr;
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr livox_sub_ = nullptr;
-
-    /// 双雷达在线标定旁路，不影响原定位分支
-    std::string front_lidar_topic_;
-    std::string rear_lidar_topic_;
-    double dual_lidar_sync_tolerance_ = 0.02;
-    size_t dual_lidar_max_queue_size_ = 20;
-
-    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr front_lidar_sub_ = nullptr;
-    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr rear_lidar_sub_ = nullptr;
-
-    std::mutex dual_lidar_mutex_;
-    std::deque<TimedCloud> front_lidar_queue_;
-    std::deque<TimedCloud> rear_lidar_queue_;
-    sys::AsyncMessageProcess<TimedCloudPair> dual_lidar_pair_proc_;
 };
 
-}  // namespace lightning
+};  // namespace lightning
 
 #endif  // LIGHTNING_LOC_SYSTEM_H

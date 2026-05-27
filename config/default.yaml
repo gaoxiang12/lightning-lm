@@ -1,27 +1,26 @@
-# 针对NCLT的配�?
+# 针对NCLT的配置
 common:
-  dataset: "livox"
-  lidar_topic: "/cx/cloud"
-  livox_lidar_topic: "/livox/lidar_192_168_1_3"
-  imu_topic: "/imu_data"
+  dataset: "nclt"
+  lidar_topic: "points_raw"
+  livox_lidar_topic: "/livox/lidar"
+  imu_topic: "/livox/imu"
 
 # fasterlio 参数
 fasterlio:
-  lidar_type: 2                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR,
-  scan_line: 16
-  blind: 0                # 盲区，小于盲区距离的不会处理
-  time_scale: 1000             # 兼容不同数据集的时间单位，仅对Velodyne LiDAR(lidar_type=2)生效
+  lidar_type: 1                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR,
+  scan_line: 32
+  blind: 0.1                # 盲区，小于盲区距离的不会处理
+  time_scale: 1e-3             # 兼容不同数据集的时间单位，仅对Velodyne LiDAR(lidar_type=2)生效
 
   skip_lidar_num: 0 # 点云的跳帧情况
-  point_filter_num: 1 # 点云采样参数
-  max_iteration: 6 # 最大迭代次数
+  point_filter_num: 4 # 点云采样参数
+  max_iteration: 4 # 最大迭代次数
   filter_size_scan: 0.5 # 对scan进行的降采样
   filter_size_map: 0.5
 
-
-  ivox_grid_resolution: 0.1        # default=0.2
+  ivox_grid_resolution: 0.5        # default=0.2
   ivox_nearby_type: 18             # 6, 18, 26
-  esti_plane_threshold: 0.15        # default=0.1
+  esti_plane_threshold: 0.1        # default=0.1
 
   use_aa: false  # use anderson-acceleration
 
@@ -30,9 +29,7 @@ fasterlio:
   b_acc_cov: 0.0001
   b_gyr_cov: 0.0001
   extrinsic_est_en: false      # true: enable the online estimation of IMU-LiDAR extrinsic
-  # T_imu_front: p_imu = T_imu_front * p_front.
-  # Front multi-line lidar center in imu_link: x forward, y right, z up, unit: m.
-  extrinsic_T: [ 8.260, 0.745, 0.409 ]
+  extrinsic_T: [ 0, 0, 0.28 ]
   extrinsic_R: [ 1, 0, 0,
                  0, 1, 0,
                  0, 0, 1 ]
@@ -56,11 +53,10 @@ g2p5:
   grid_map_resolution: 0.2 # 栅格地图分辨率
 
 system:
-  frontend: "lio_sam" # options: fasterlio, lio_sam
-  with_loop_closing: false # 是否关闭回环检测
+  with_loop_closing: true # 是否需要回环检测
   with_ui: true # 是否需要3D UI
   with_2dui: false # 是否需要2D UI
-  with_g2p5: false # 是否需要栅格地图
+  with_g2p5: true # 是否需要栅格地图
   step_on_kf: false # 是否在关键帧处暂停
 
   enable_lidar_loc_skip: false
@@ -76,43 +72,12 @@ loop_closing:
   loop_kf_gap: 20       # 每隔多少个关键帧检查一次
   min_id_interval: 20   # 被检查的关键帧ID间隔
   closest_id_th: 50     # 历史关键帧与当前帧的ID间隔
-  max_range: 30.0       # 候选帧的最大距离
+  max_range: 20.0       # 候选帧的最大距离
   ndt_score_th: 1.3     # ndt位姿分值
-  with_height: true
+  with_height: false
 
 
 ### localization ================================================================================================
-localization:
-  mode: "localization"
-  lidar_count: 1
-
-dual_lidar_localization:
-  # Dual lidar localization fuses front/rear into one virtual front_lidar cloud.
-  # fasterlio.extrinsic_T / extrinsic_R must describe p_imu = T_imu_front * p_front.
-  front_lidar_topic: "/lidar_points"
-  rear_lidar_topic: "/lidar_points_2"
-  sync_tolerance: 0.02
-  max_queue_size: 20
-  pair_process_queue_size: 3
-  # true allows front-only or rear-only fallback when the paired message preprocesses to an empty cloud.
-  allow_single_lidar_fallback: true
-  # p_front = T_front_rear * p_rear.
-  T_front_rear:
-    translation: [-8.460, -1.490, 0.0]
-    rpy_deg: [0.0, 0.0, 180.0]
-  front_preprocess:
-    lidar_type: 2
-    blind: 0.5
-    time_scale: 0.001
-    scan_line: 32
-    point_filter_num: 1
-  rear_preprocess:
-    lidar_type: 2
-    blind: 0.5
-    time_scale: 0.001
-    scan_line: 32
-    point_filter_num: 1
-
 lidar_loc:
   enable_dynamic_polygon: false
   enable_parking_static: true
@@ -172,101 +137,3 @@ ui:
   car_width: 1.6
   car_height: 1.7
   scans: 1
-
-# LIO-SAM frontend parameters converted from LIO-SAM-mitanai/config/params.yaml.
-# Used only when system.frontend is "lio_sam".
-lio_sam:
-  # Topics
-  pointCloudTopic: "/cx/cloud"
-  imuTopic: "/imu_data"
-  odomTopic: "lio_sam/imu/odom"
-  gpsTopic: "odometry/gpsz"
-
-  # Frames
-  lidarFrame: "laser_link"
-  baselinkFrame: "base_link"
-  odometryFrame: "odom"
-  mapFrame: "map"
-
-  # GPS settings
-  useImuHeadingInitialization: false
-  useImuAccelRollPitchInitialization: true
-  useGpsElevation: false
-  gpsCovThreshold: 2.0
-  poseCovThreshold: 25.0
-
-  # Export settings
-  savePCD: true
-  savePCDDirectory: "/Downloads/LOAM/"
-
-  # Sensor settings
-  sensor: "velodyne"
-  N_SCAN: 16
-  Horizon_SCAN: 2000
-  downsampleRate: 1
-  lidarMinRange: 0.5
-  lidarMaxRange: 200.0
-
-  # IMU settings
-  imuAccNoise: 3.9939570888238808e-03
-  imuGyrNoise: 1.5636343949698187e-03
-  imuAccBiasN: 6.4356659353532566e-05
-  imuGyrBiasN: 3.5640318696367613e-05
-  imuGravity: 9.80511
-  imuRPYWeight: 0.01
-  extrinsicTrans: [0.0, 0.0, -0.2]
-  extrinsicRot: [1.0, 0.0, 0.0,
-                 0.0, 1.0, 0.0,
-                 0.0, 0.0, 1.0]
-  extrinsicRPY: [1.0, 0.0, 0.0,
-                 0.0, 1.0, 0.0,
-                 0.0, 0.0, 1.0]
-
-  # LOAM feature threshold
-  edgeThreshold: 1.0
-  surfThreshold: 0.1
-  edgeFeatureMinValidNum: 10
-  surfFeatureMinValidNum: 100
-
-  # Voxel filters
-  odometrySurfLeafSize: 0.2
-  mappingCornerLeafSize: 0.1
-  mappingSurfLeafSize: 0.2
-
-  # Robot motion constraint
-  z_tollerance: 1000.0
-  rotation_tollerance: 1000.0
-
-  # CPU params
-  numberOfCores: 4
-  mappingProcessInterval: 0.15
-  mappingLowSpeedMaxTranslationSpeed: 0.8
-
-  # Surrounding map
-  surroundingkeyframeAddingDistThreshold: 1.0
-  surroundingkeyframeAddingAngleThreshold: 0.2
-  surroundingKeyframeDensity: 2.0
-  surroundingKeyframeSearchRadius: 50.0
-
-  # Loop closure
-  loopClosureEnableFlag: true
-  loopClosureFrequency: 1.0
-  surroundingKeyframeSize: 50
-  historyKeyframeSearchRadius: 15.0
-  historyKeyframeSearchTimeDiff: 30.0
-  historyKeyframeSearchNum: 25
-  historyKeyframeFitnessScore: 0.3
-
-  # Motion gate settings
-  mappingMotionGateEnable: true
-  mappingIcpFallbackEnable: false
-  mappingMotionMaxSpeed: 3.0
-  mappingMotionMaxAngularVelocity: 90.0
-  mappingMotionMaxCurvature: 2.0
-  mappingMotionMaxRollPitchDeg: 20.0
-  mappingFallbackIcpSkipOnBadLmMotion: true
-
-  # Visualization
-  globalMapVisualizationSearchRadius: 1000.0
-  globalMapVisualizationPoseDensity: 10.0
-  globalMapVisualizationLeafSize: 1.0

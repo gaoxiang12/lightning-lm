@@ -5,10 +5,8 @@
 
 #include <boost/format.hpp>
 #include <cassert>
-#include <algorithm>
 #include <cmath>
 #include <iomanip>
-#include <numeric>
 
 namespace lightning::loc {
 
