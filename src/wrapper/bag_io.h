@@ -51,6 +51,7 @@ class RosbagIO {
     using LivoxCloud2Handle = std::function<bool(livox_ros_driver2::msg::CustomMsg::SharedPtr)>;
     using FullPointCloudHandle = std::function<bool(FullCloudPtr)>;
     using ImuHandle = std::function<bool(IMUPtr)>;
+    using RawImuHandle = std::function<bool(sensor_msgs::msg::Imu::SharedPtr)>;
     using OdomHandle = std::function<bool(const OdomPtr &)>;
 
     /**
@@ -108,6 +109,16 @@ class RosbagIO {
         });
     }
 
+    RosbagIO &AddImuHandle(const std::string &topic_name, RawImuHandle f) {
+        return AddHandle(topic_name, [f, this](const MsgType &m) -> bool {
+            auto msg = std::make_shared<sensor_msgs::msg::Imu>();
+            rclcpp::SerializedMessage data(*m->serialized_data);
+            seri_imu_.deserialize_message(&data, msg.get());
+
+            return f(msg);
+        });
+    }
+
     /// odom 处理
     // RosbagIO &AddOdomHandle(const std::string &topic_name, OdomHandle f) {
     //     return AddHandle(topic_name, [f, this](const MsgType &m) -> bool {
@@ -138,3 +149,4 @@ class RosbagIO {
 }  // namespace lightning
 
 #endif  // SLAM_ROS_BAG_IO_H
+

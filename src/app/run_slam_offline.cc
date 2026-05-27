@@ -11,7 +11,7 @@
 #include "wrapper/bag_io.h"
 #include "wrapper/ros_utils.h"
 
-#include <yaml-cpp/yaml.h>
+#include "io/yaml_io.h"
 
 DEFINE_string(input_bag, "", "输入数据包");
 DEFINE_string(config, "./config/default.yaml", "配置文件");
@@ -54,12 +54,13 @@ int main(int argc, char** argv) {
 
     rosbag
         /// IMU 的处理
+        /*
         .AddImuHandle(imu_topic,
                       [&slam](IMUPtr imu) {
                           slam.ProcessIMU(imu);
                           return true;
                       })
-        
+        */
         .AddImuHandle(imu_topic,
                       [&slam](sensor_msgs::msg::Imu::SharedPtr imu) {
                           slam.ProcessIMU(imu);
@@ -86,3 +87,4 @@ int main(int argc, char** argv) {
 
     return 0;
 }
+

@@ -35,10 +35,10 @@ fasterlio:
   gyr_cov: 0.1
   b_acc_cov: 0.0001
   b_gyr_cov: 0.0001
-  extrinsic_T: [ 0.0, 0.0, 0.2 ]
-  extrinsic_R: [ 1, 0, 0,
-                 0, 1, 0,
-                 0, 0, 1 ]
+  extrinsic_T: [ -0.200, 0.745, 0.409 ]
+  extrinsic_R: [ 0.0, -1.0, 0.0,
+               1.0,  0.0, 0.0,
+               0.0,  0.0, 1.0]
   keep_first_imu_estimation: false
   kf_dis_th: 2.0
   kf_angle_th: 5.0
@@ -143,13 +143,13 @@ lio_sam:
   imuGyrBiasN: 3.5640318696367613e-05
   imuGravity: 9.80511
   imuRPYWeight: 0.01
-  extrinsicTrans: [0.0, 0.0, -0.2]
-  extrinsicRot: [1.0, 0.0, 0.0,
-                 0.0, 1.0, 0.0,
-                 0.0, 0.0, 1.0]
-  extrinsicRPY: [1.0, 0.0, 0.0,
-                 0.0, 1.0, 0.0,
-                 0.0, 0.0, 1.0]
+  extrinsicTrans: [-0.200, 0.745, 0.409]
+  extrinsicRot: [0.0, -1.0, 0.0,
+               1.0,  0.0, 0.0,
+               0.0,  0.0, 1.0]
+  extrinsicRPY: [0.0, -1.0, 0.0,
+               1.0,  0.0, 0.0,
+               0.0,  0.0, 1.0]
 
   # LOAM feature threshold
   edgeThreshold: 1.0

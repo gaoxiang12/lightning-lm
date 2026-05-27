@@ -1,14 +1,22 @@
-#include <pcl/common/transforms.h>
-#include <pcl_conversions/pcl_conversions.h>
-
-#include "core/localization/lidar_loc/lidar_loc.h"
 #include "core/localization/localization.h"
 
-#include <opencv2/highgui.hpp>
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <iomanip>
+#include <utility>
+#include <vector>
 
-#include "core/localization/pose_graph/pgo.h"
-#include "ui/pangolin_window.h"
+#include <opencv2/highgui.hpp>
 #include <yaml-cpp/yaml.h>
+
+#include "common/constant.h"
+#include "common/options.h"
+#include "core/lightning_math.hpp"
+#include "core/localization/lidar_loc/lidar_loc.h"
+#include "core/localization/pose_graph/pgo.h"
+#include "io/yaml_io.h"
+#include "ui/pangolin_window.h"
 
 namespace lightning::loc {
 
@@ -341,7 +349,9 @@ void Localization::ProcessIMUMsg(IMUPtr imu) {
 // }
 
 void Localization::Finish() {
-    lidar_loc_->Finish();
+    if (lidar_loc_) {
+        lidar_loc_->Finish();
+    }
     if (ui_) {
         ui_->Quit();
     }
@@ -361,3 +371,4 @@ void Localization::SetExternalPose(const Eigen::Quaterniond& q, const Eigen::Vec
 void Localization::SetTFCallback(Localization::TFCallback&& callback) { tf_callback_ = callback; }
 
 }  // namespace lightning::loc
+
