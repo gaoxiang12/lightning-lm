@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <iomanip>
 #include <utility>
 
@@ -215,9 +216,9 @@ void LioSamMapping::ProcessPointCloud2(CloudPtr cloud) {
         point.time = static_cast<float>(source.time * 1e-3);
         native_cloud.push_back(point);
     }
-    native_cloud.height = cloud->height;
-    native_cloud.width = cloud->width;
-    native_cloud.is_dense = cloud->is_dense;
+    native_cloud.height = 1;
+    native_cloud.width = native_cloud.size();
+    native_cloud.is_dense = false;
     sensor_msgs::msg::PointCloud2 msg;
     pcl::toROSMsg(native_cloud, msg);
 
@@ -368,16 +369,16 @@ bool LioSamMapping::Run() {
         return false;
     }
 
-    state_.timestamp_ = map_optimization_->timeLaserInfoCur;
-    state_.pos_ = Vec3d(map_optimization_->transformTobeMapped[3],
-                        map_optimization_->transformTobeMapped[4],
-                        map_optimization_->transformTobeMapped[5]);
-    state_.rot_ = RpyToSO3(map_optimization_->transformTobeMapped[0],
-                           map_optimization_->transformTobeMapped[1],
-                           map_optimization_->transformTobeMapped[2]);
+    const float* transform = map_optimization_->TransformTobeMapped();
+    state_.timestamp_ = map_optimization_->TimeLaserInfoCur();
+    state_.pos_ = Vec3d(transform[3], transform[4], transform[5]);
+    state_.rot_ = RpyToSO3(transform[0], transform[1], transform[2]);
+    state_.pose_is_ok_ = map_optimization_->mappingPoseReliable;
+    state_.lidar_odom_reliable_ = map_optimization_->mappingPoseReliable;
 
     scan_undistort_->clear();
     if (cloud_info.cloud_deskewed) {
+        scan_undistort_->header = cloud_info.cloud_deskewed->header;
         scan_undistort_->reserve(cloud_info.cloud_deskewed->size());
         for (const auto& p : cloud_info.cloud_deskewed->points) {
             PointType pt;
@@ -388,11 +389,11 @@ bool LioSamMapping::Run() {
             pt.time = 0.0;
             scan_undistort_->push_back(pt);
         }
-        scan_undistort_->height = 1;
-        scan_undistort_->width = scan_undistort_->size();
-        scan_undistort_->is_dense = cloud_info.cloud_deskewed->is_dense;
     }
-    recent_cloud_ = scan_undistort_;
+    scan_undistort_->height = 1;
+    scan_undistort_->width = scan_undistort_->size();
+    scan_undistort_->is_dense = false;
+    recent_cloud_.reset(new PointCloudType(*scan_undistort_));
 
     if (ui_) {
         ui_->UpdateNavState(state_);
@@ -405,20 +406,18 @@ bool LioSamMapping::Run() {
 }
 
 bool LioSamMapping::MakeLightningKeyframeIfNeeded() {
-    if (!map_optimization_ || !map_optimization_->createdNewKeyframe || !map_optimization_->cloudKeyPoses6D ||
-        map_optimization_->cloudKeyPoses6D->empty() ||
-        map_optimization_->cloudKeyPoses6D->size() <= native_keyframe_count_) {
+    if (!map_optimization_ || !map_optimization_->CreatedNewKeyframe() ||
+        map_optimization_->KeyPoseSize() == 0 ||
+        map_optimization_->KeyPoseSize() <= native_keyframe_count_) {
         return false;
     }
 
-    const auto& pose = map_optimization_->cloudKeyPoses6D->points.back();
-    pcl::PointCloud<::PointType>::Ptr native_cloud;
-    if (!map_optimization_->rawCloudKeyFrames.empty()) {
-        native_cloud = map_optimization_->rawCloudKeyFrames.back();
-    }
+    const auto pose = map_optimization_->KeyPose(map_optimization_->KeyPoseSize() - 1);
+    pcl::PointCloud<::PointType>::Ptr native_cloud = map_optimization_->LatestRawCloudKeyFrame();
 
     CloudPtr cloud(new PointCloudType());
     if (native_cloud) {
+        cloud->header = scan_undistort_->header;
         cloud->reserve(native_cloud->size());
         for (const auto& p : native_cloud->points) {
             PointType pt;
@@ -426,17 +425,19 @@ bool LioSamMapping::MakeLightningKeyframeIfNeeded() {
             pt.y = p.y;
             pt.z = p.z;
             pt.intensity = p.intensity;
-            pt.time = 0.0;
+            pt.time = p.time;
             cloud->push_back(pt);
         }
-        cloud->height = 1;
-        cloud->width = cloud->size();
-        cloud->is_dense = native_cloud->is_dense;
     }
+    cloud->height = 1;
+    cloud->width = cloud->size();
+    cloud->is_dense = false;
 
     state_.timestamp_ = pose.time;
     state_.pos_ = Vec3d(pose.x, pose.y, pose.z);
     state_.rot_ = RpyToSO3(pose.roll, pose.pitch, pose.yaw);
+    state_.pose_is_ok_ = true;
+    state_.lidar_odom_reliable_ = true;
 
     auto kf = std::make_shared<Keyframe>(kf_id_++, cloud, state_);
     kf->SetLIOPose(state_.GetPose());
@@ -445,8 +446,8 @@ bool LioSamMapping::MakeLightningKeyframeIfNeeded() {
 
     all_keyframes_.push_back(kf);
     last_kf_ = kf;
-    native_keyframe_count_ = map_optimization_->cloudKeyPoses6D->size();
-    map_optimization_->createdNewKeyframe = false;
+    native_keyframe_count_ = map_optimization_->KeyPoseSize();
+    map_optimization_->ClearCreatedNewKeyframe();
 
     LOG(INFO) << "LIO-SAM: create lightning keyframe " << kf->GetID() << ", pose: "
               << state_.pos_.transpose() << ", time: " << std::setprecision(14) << state_.timestamp_;
@@ -454,17 +455,19 @@ bool LioSamMapping::MakeLightningKeyframeIfNeeded() {
 }
 
 void LioSamMapping::SyncLightningKeyframePoses() {
-    if (!map_optimization_ || !map_optimization_->cloudKeyPoses6D) {
+    if (!map_optimization_) {
         return;
     }
 
-    const size_t n = std::min(all_keyframes_.size(), map_optimization_->cloudKeyPoses6D->size());
+    const size_t n = std::min(all_keyframes_.size(), map_optimization_->KeyPoseSize());
     for (size_t i = 0; i < n; ++i) {
-        const auto& pose = map_optimization_->cloudKeyPoses6D->points[i];
+        const auto pose = map_optimization_->KeyPose(i);
         NavState state;
         state.timestamp_ = pose.time;
         state.pos_ = Vec3d(pose.x, pose.y, pose.z);
         state.rot_ = RpyToSO3(pose.roll, pose.pitch, pose.yaw);
+        state.pose_is_ok_ = true;
+        state.lidar_odom_reliable_ = true;
         all_keyframes_[i]->SetLIOPose(state.GetPose());
         all_keyframes_[i]->SetOptPose(state.GetPose());
         all_keyframes_[i]->SetState(state);
