@@ -275,9 +275,11 @@ void Localization::ProcessIMUMsg(IMUPtr imu) {
         (use_lio_sam_ && lio_sam_ == nullptr) || pgo_ == nullptr) {
         return;
     }
+    if (!imu) {
+        return;
+    }
 
-    IMUPtr internal_imu = preprocess_->process_imu(imu);
-    double this_imu_time = internal_imu->timestamp;
+    double this_imu_time = imu->timestamp;
     if (last_imu_time_ > 0 && this_imu_time < last_imu_time_) {
         LOG(WARNING) << "IMU 时间异常：" << this_imu_time << ", last: " << last_imu_time_;
     }
@@ -285,9 +287,9 @@ void Localization::ProcessIMUMsg(IMUPtr imu) {
 
     /// 里程计处理IMU
     if (use_lio_sam_) {
-        lio_sam_->ProcessIMU(internal_imu);
+        lio_sam_->ProcessIMU(imu);
     } else {
-        lio_->ProcessIMU(internal_imu);
+        lio_->ProcessIMU(imu);
     }
 
     /// 这里需要 IMU predict，否则没法process DR了

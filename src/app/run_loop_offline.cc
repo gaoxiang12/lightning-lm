@@ -53,8 +53,8 @@ int main(int argc, char** argv) {
 
     rosbag
         .AddImuHandle("imu_raw",
-                      [&lio, &preprocess](IMUPtr imu) {
-                          lio.ProcessIMU(preprocess.process_imu(imu));
+                      [&lio](IMUPtr imu) {
+                          lio.ProcessIMU(imu);
                           return true;
                       })
         .AddPointCloud2Handle("points_raw",

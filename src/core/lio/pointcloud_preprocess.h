@@ -7,8 +7,6 @@
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
-#include <sensor_msgs/msg/imu.hpp>
-
 #include "common/measure_group.h"
 #include "common/point_def.h"
 #include "livox_ros_driver2/msg/custom_msg.hpp"
@@ -37,11 +35,6 @@ class PointCloudPreprocess {
     void Process(const sensor_msgs::msg::PointCloud2 ::SharedPtr &msg, PointCloudType::Ptr &pcl_out);
 
     void Process(const livox_ros_driver2::msg::CustomMsg::SharedPtr &cloud, PointCloudType::Ptr &pcl_out);
-
-    /// Convert sensor clocks into a common relative time base for each stream.
-    uint64_t process_time(double raw_timestamp);
-    IMUPtr process_imu(const IMUPtr& imu);
-    IMUPtr process_imu(const sensor_msgs::msg::Imu::SharedPtr& imu);
 
     void Set(LidarType lid_type, double bld, int pfilt_num);
 
@@ -74,8 +67,6 @@ class PointCloudPreprocess {
 
     float height_max_ = 1.0;
     float height_min_ = -1.0;
-    double first_lidar_timestamp_ = -1.0;
-    double first_imu_timestamp_ = -1.0;
 };
 }  // namespace lightning
 

@@ -29,8 +29,6 @@ bool PointCloudPreprocess::Init(const std::string& yaml_path) {
             return false;
         }
         lidar_type_ = static_cast<LidarType>(lidar_type);
-        first_lidar_timestamp_ = -1.0;
-        first_imu_timestamp_ = -1.0;
         return true;
     } catch (const std::exception& e) {
         LOG(ERROR) << "failed to initialize point cloud preprocess: " << e.what();
@@ -63,7 +61,7 @@ void PointCloudPreprocess::Process(const sensor_msgs::msg::PointCloud2 ::SharedP
             break;
     }
     *pcl_out = cloud_out_;
-    pcl_out->header.stamp = process_time(ToSec(msg->header.stamp));
+    pcl_out->header.stamp = ToNanoSec(msg->header.stamp);
 }
 
 void PointCloudPreprocess::Process(const livox_ros_driver2::msg::CustomMsg::SharedPtr &msg,
@@ -124,44 +122,7 @@ void PointCloudPreprocess::Process(const livox_ros_driver2::msg::CustomMsg::Shar
     cloud_out_.height = 1;
     cloud_out_.is_dense = false;
     *pcl_out = cloud_out_;
-    pcl_out->header.stamp = process_time(ToSec(msg->header.stamp));
-}
-
-uint64_t PointCloudPreprocess::process_time(double raw_timestamp) {
-    if (first_lidar_timestamp_ < 0.0) {
-        first_lidar_timestamp_ = raw_timestamp;
-        LOG(INFO) << "first lidar timestamp: " << first_lidar_timestamp_;
-    }
-    const double relative_time = std::max(0.0, raw_timestamp - first_lidar_timestamp_);
-    return static_cast<uint64_t>(std::llround(relative_time * 1e9));
-}
-
-IMUPtr PointCloudPreprocess::process_imu(const IMUPtr& imu) {
-    if (!imu) {
-        return nullptr;
-    }
-    if (first_imu_timestamp_ < 0.0) {
-        first_imu_timestamp_ = imu->timestamp;
-        LOG(INFO) << "first IMU timestamp: " << first_imu_timestamp_;
-    }
-    IMUPtr output = std::make_shared<IMU>(*imu);
-    output->timestamp = imu->timestamp - first_imu_timestamp_;
-    return output;
-}
-
-IMUPtr PointCloudPreprocess::process_imu(const sensor_msgs::msg::Imu::SharedPtr& imu) {
-    if (!imu) {
-        return nullptr;
-    }
-    IMUPtr output = std::make_shared<IMU>();
-    output->timestamp = ToSec(imu->header.stamp);
-    output->angular_velocity =
-        Vec3d(imu->angular_velocity.x, imu->angular_velocity.y, imu->angular_velocity.z);
-    output->linear_acceleration =
-        Vec3d(imu->linear_acceleration.x, imu->linear_acceleration.y, imu->linear_acceleration.z);
-    output->orientation =
-        Quatd(imu->orientation.w, imu->orientation.x, imu->orientation.y, imu->orientation.z);
-    return process_imu(output);
+    pcl_out->header.stamp = ToNanoSec(msg->header.stamp);
 }
 
 void PointCloudPreprocess::Oust64Handler(const sensor_msgs::msg::PointCloud2::SharedPtr &msg) {

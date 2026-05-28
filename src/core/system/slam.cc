@@ -262,8 +262,18 @@ void SlamSystem::ProcessIMU(const sensor_msgs::msg::Imu::SharedPtr& imu) {
     if (running_ == false) {
         return;
     }
+    if (!imu) {
+        return;
+    }
 
-    IMUPtr input = preprocess_->process_imu(imu);
+    IMUPtr input = std::make_shared<IMU>();
+    input->timestamp = ToSec(imu->header.stamp);
+    input->angular_velocity =
+        Vec3d(imu->angular_velocity.x, imu->angular_velocity.y, imu->angular_velocity.z);
+    input->linear_acceleration =
+        Vec3d(imu->linear_acceleration.x, imu->linear_acceleration.y, imu->linear_acceleration.z);
+    input->orientation =
+        Quatd(imu->orientation.w, imu->orientation.x, imu->orientation.y, imu->orientation.z);
     if (use_lio_sam_) {
         lio_sam_->ProcessIMU(input);
     } else {
@@ -275,11 +285,13 @@ void SlamSystem::ProcessIMU(const lightning::IMUPtr& imu) {
     if (running_ == false) {
         return;
     }
-    IMUPtr input = preprocess_->process_imu(imu);
+    if (!imu) {
+        return;
+    }
     if (use_lio_sam_) {
-        lio_sam_->ProcessIMU(input);
+        lio_sam_->ProcessIMU(imu);
     } else {
-        lio_->ProcessIMU(input);
+        lio_->ProcessIMU(imu);
     }
 }
 

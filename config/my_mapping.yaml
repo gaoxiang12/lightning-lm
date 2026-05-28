@@ -11,8 +11,8 @@ common:
   map_frame: "map"
 
 fasterlio:
-  # 输入预处理：4 表示带 timestamp 字段的禾赛/RoboSense 格式
-  lidar_type: 4
+  # 输入预处理：2 表示 Velodyne 格式，使用点云中每个点的相对时间戳
+  lidar_type: 2
   scan_line: 16
   blind: 0
   time_scale: 1000
@@ -193,4 +193,3 @@ lio_sam:
   mappingMotionMaxCurvature: 2.0
   mappingMotionMaxRollPitchDeg: 20.0
   mappingFallbackIcpSkipOnBadLmMotion: true
-
