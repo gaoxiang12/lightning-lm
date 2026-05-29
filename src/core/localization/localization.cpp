@@ -1,19 +1,10 @@
+#include <pcl/common/transforms.h>
+#include <pcl_conversions/pcl_conversions.h>
+
+#include "core/localization/lidar_loc/lidar_loc.h"
 #include "core/localization/localization.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
-#include <iomanip>
-#include <utility>
-#include <vector>
-
 #include <opencv2/highgui.hpp>
-#include <yaml-cpp/yaml.h>
-
-#include "common/constant.h"
-#include "common/options.h"
-#include "core/lightning_math.hpp"
-#include "core/localization/lidar_loc/lidar_loc.h"
 #include "core/localization/pose_graph/pgo.h"
 #include "io/yaml_io.h"
 #include "ui/pangolin_window.h"
@@ -31,13 +22,9 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
         Finish();
     }
 
-    const YAML::Node yaml = YAML::LoadFile(yaml_path);
-    options_.with_ui_ = yaml["system"]["with_ui"].as<bool>();
-
-    std::string frontend = "laser_mapping";
-    if (yaml["system"]["frontend"]) {
-        frontend = yaml["system"]["frontend"].as<std::string>();
-    }
+    YAML_IO yaml(yaml_path);
+    options_.with_ui_ = yaml.GetValue<bool>("system", "with_ui");
+    std::string frontend = yaml.GetValue<string>("system", "frontend");
     use_lio_sam_ = frontend == "lio_sam" || frontend == "liosam";
 
     preprocess_ = std::make_shared<PointCloudPreprocess>();
@@ -67,8 +54,8 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
 
     /// 激光定位
     LidarLoc::Options lidar_loc_options;
-    lidar_loc_options.update_dynamic_cloud_ = yaml["lidar_loc"]["update_dynamic_cloud"].as<bool>();
-    lidar_loc_options.force_2d_ = yaml["lidar_loc"]["force_2d"].as<bool>();
+    lidar_loc_options.update_dynamic_cloud_ = yaml.GetValue<bool>("lidar_loc", "update_dynamic_cloud");
+    lidar_loc_options.force_2d_ = yaml.GetValue<bool>("lidar_loc", "force_2d");
     lidar_loc_options.map_option_.enable_dynamic_polygon_ = false;
     lidar_loc_options.map_option_.map_path_ = global_map_path;
     lidar_loc_ = std::make_shared<LidarLoc>(lidar_loc_options);
@@ -83,22 +70,19 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
         // lio_->SetUI(ui_);
     }
 
-    if (!lidar_loc_->Init(yaml_path)) {
-        LOG(ERROR) << "failed to initialize localization map";
-        return false;
-    }
+    lidar_loc_->Init(yaml_path);
 
     /// pose graph
     pgo_ = std::make_shared<PGO>();
     pgo_->SetDebug(false);
 
     ///  各模块的异步调用
-    options_.enable_lidar_loc_skip_ = yaml["system"]["enable_lidar_loc_skip"].as<bool>();
-    options_.enable_lidar_loc_rviz_ = yaml["system"]["enable_lidar_loc_rviz"].as<bool>();
-    options_.lidar_loc_skip_num_ = yaml["system"]["lidar_loc_skip_num"].as<int>();
-    options_.enable_lidar_odom_skip_ = yaml["system"]["enable_lidar_odom_skip"].as<bool>();
-    options_.lidar_odom_skip_num_ = yaml["system"]["lidar_odom_skip_num"].as<int>();
-    options_.loc_on_kf_ = yaml["lidar_loc"]["loc_on_kf"].as<bool>();
+    options_.enable_lidar_loc_skip_ = yaml.GetValue<bool>("system", "enable_lidar_loc_skip");
+    options_.enable_lidar_loc_rviz_ = yaml.GetValue<bool>("system", "enable_lidar_loc_rviz");
+    options_.lidar_loc_skip_num_ = yaml.GetValue<int>("system", "lidar_loc_skip_num");
+    options_.enable_lidar_odom_skip_ = yaml.GetValue<bool>("system", "enable_lidar_odom_skip");
+    options_.lidar_odom_skip_num_ = yaml.GetValue<int>("system", "lidar_odom_skip_num");
+    options_.loc_on_kf_ = yaml.GetValue<bool>("lidar_loc", "loc_on_kf");
 
     lidar_odom_proc_cloud_.SetMaxSize(1);
     lidar_loc_proc_cloud_.SetMaxSize(1);
@@ -128,7 +112,7 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
         loc_result_ = res;
 
         if (tf_callback_ && loc_result_.valid_) {
-            tf_callback_(loc_result_);
+            tf_callback_(loc_result_.ToGeoMsg());
         }
 
         if (ui_) {
@@ -182,9 +166,6 @@ void Localization::LidarOdomProcCloud(CloudPtr cloud) {
     }
 
     /// NOTE: 在NCLT这种数据集中，lio内部是有缓存的，它拿到的点云不一定是最新时刻的点云
-    NavState lo_state;
-    CloudPtr scan;
-    Keyframe::Ptr kf;
     if (use_lio_sam_) {
         lio_sam_->ProcessPointCloud2(cloud);
         if (!lio_sam_->Run()) {
@@ -192,7 +173,7 @@ void Localization::LidarOdomProcCloud(CloudPtr cloud) {
         }
         lo_state = lio_sam_->GetState();
         scan = lio_sam_->GetProjCloud();
-        kf = lio_sam_->GetKeyframe();
+        
     } else {
         lio_->ProcessPointCloud2(cloud);
         if (!lio_->Run()) {
@@ -200,7 +181,7 @@ void Localization::LidarOdomProcCloud(CloudPtr cloud) {
         }
         lo_state = lio_->GetState();
         scan = lio_->GetProjCloud();
-        kf = lio_->GetKeyframe();
+
     }
 
     lidar_loc_->ProcessLO(lo_state);
@@ -212,6 +193,11 @@ void Localization::LidarOdomProcCloud(CloudPtr cloud) {
     /// 获得lio的关键帧
 
     if (options_.loc_on_kf_) {
+        if (use_lio_sam_) {
+           auto kf = lio_sam_->GetKeyframe();
+        } else {
+           auto kf = lio_->GetKeyframe();
+        }
         if (kf == lio_kf_) {
             /// 关键帧未更新，那就只更新IMU状态
 
@@ -273,9 +259,6 @@ void Localization::ProcessIMUMsg(IMUPtr imu) {
 
     if (lidar_loc_ == nullptr || (!use_lio_sam_ && lio_ == nullptr) ||
         (use_lio_sam_ && lio_sam_ == nullptr) || pgo_ == nullptr) {
-        return;
-    }
-    if (!imu) {
         return;
     }
 
@@ -351,9 +334,7 @@ void Localization::ProcessIMUMsg(IMUPtr imu) {
 // }
 
 void Localization::Finish() {
-    if (lidar_loc_) {
-        lidar_loc_->Finish();
-    }
+    lidar_loc_->Finish();
     if (ui_) {
         ui_->Quit();
     }
@@ -373,4 +354,3 @@ void Localization::SetExternalPose(const Eigen::Quaterniond& q, const Eigen::Vec
 void Localization::SetTFCallback(Localization::TFCallback&& callback) { tf_callback_ = callback; }
 
 }  // namespace lightning::loc
-
