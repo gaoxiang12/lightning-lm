@@ -4,7 +4,7 @@
 #include <string>
 
 #include <pcl_conversions/pcl_conversions.h>
-
+#include "wrapper/ros_utils.h"
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include "common/measure_group.h"

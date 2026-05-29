@@ -61,7 +61,7 @@ g2p5:
 system:
   frontend: "lio_sam" # options: fasterlio, lio_sam
   with_loop_closing: false # 是否需要回环检测
-  with_ui: false # 是否需要3D UI
+  with_ui: true # 是否需要3D UI
   with_2dui: false # 是否需要2D UI
   with_g2p5: false # 是否需要栅格地图
   step_on_kf: false # 是否在关键帧处暂停
