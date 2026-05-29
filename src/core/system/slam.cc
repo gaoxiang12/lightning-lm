@@ -262,10 +262,6 @@ void SlamSystem::ProcessIMU(const sensor_msgs::msg::Imu::SharedPtr& imu) {
     if (running_ == false) {
         return;
     }
-    if (!imu) {
-        return;
-    }
-
     IMUPtr input = std::make_shared<IMU>();
     input->timestamp = ToSec(imu->header.stamp);
     input->angular_velocity =
@@ -283,9 +279,6 @@ void SlamSystem::ProcessIMU(const sensor_msgs::msg::Imu::SharedPtr& imu) {
 
 void SlamSystem::ProcessIMU(const lightning::IMUPtr& imu) {
     if (running_ == false) {
-        return;
-    }
-    if (!imu) {
         return;
     }
     if (use_lio_sam_) {

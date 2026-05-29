@@ -12,7 +12,7 @@ common:
 
 fasterlio:
   # 输入预处理：2 表示 Velodyne 格式，使用点云中每个点的相对时间戳
-  lidar_type: 2
+  lidar_type: 4
   scan_line: 16
   blind: 0
   time_scale: 1000
@@ -119,6 +119,17 @@ pgo:
   pgo_frame_converge_ang_th: 1.0
   pgo_frame_converge_pos_th: 0.05
   smooth_factor: 0.01
+roi:
+  height_max: 10.0
+  height_min: 0.5
+  range_max: 70
+  range_min: 3.0
+ui:
+  car_length: 2.0
+  car_width: 1.6
+  car_height: 1.7
+  scans: 1
+
 # LIO-SAM frontend parameters converted from LIO-SAM-mitanai/config/params.yaml.
 # Used only when system.frontend is "lio_sam".
 lio_sam:
@@ -130,8 +141,8 @@ lio_sam:
   useImuAccelRollPitchInitialization: true
 
   # Sensor settings
-  N_SCAN: 16
-  Horizon_SCAN: 2000
+  N_SCAN: 128
+  Horizon_SCAN: 1800
   downsampleRate: 1
   lidarMinRange: 0.5
   lidarMaxRange: 200.0
@@ -144,8 +155,8 @@ lio_sam:
   imuGravity: 9.80511
   imuRPYWeight: 0.01
   extrinsicTrans: [-0.200, 0.745, 0.409]
-  extrinsicRot: [0.0, -1.0, 0.0,
-               1.0,  0.0, 0.0,
+  extrinsicRot: [0.0, 1.0, 0.0,
+               -1.0,  0.0, 0.0,
                0.0,  0.0, 1.0]
   extrinsicRPY: [0.0, -1.0, 0.0,
                1.0,  0.0, 0.0,

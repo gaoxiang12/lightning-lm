@@ -424,8 +424,8 @@ bool LioSamMapping::MakeLightningKeyframeIfNeeded() {
             pt.x = p.x;
             pt.y = p.y;
             pt.z = p.z;
-            pt.intensity = p.intensity;
-            pt.time = p.time;
+            pt.intensity = 0.0;
+            pt.time = 0.0;
             cloud->push_back(pt);
         }
     }

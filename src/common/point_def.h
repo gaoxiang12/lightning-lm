@@ -31,7 +31,7 @@ struct PointRobotSense {
     PCL_ADD_POINT4D
     PCL_ADD_INTENSITY
     std::uint16_t ring = 0;
-    double timestamp = 0;
+    double time = 0;
     PointRobotSense() {}
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
@@ -39,7 +39,7 @@ struct PointRobotSense {
 POINT_CLOUD_REGISTER_POINT_STRUCT(PointRobotSense,
                                   (float, x, x)(float, y, y)(float, z, z)(float, intensity,
                                                                           intensity)(std::uint16_t, ring, ring)
-                                      (double, timestamp, timestamp))
+                                      (double, time, time))
 
 namespace velodyne_ros {
 struct EIGEN_ALIGN16 Point {

@@ -1,15 +1,7 @@
 #pragma once
 
-#include <functional>
-#include <memory>
-#include <mutex>
-#include <string>
-
-#include <geometry_msgs/msg/transform_stamped.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
-#include <std_msgs/msg/int32.hpp>
-
-#include "livox_ros_driver2/msg/custom_msg.hpp"
+#include "geometry_msgs/msg/transform_stamped.hpp"
+#include "std_msgs/msg/int32.hpp"
 
 #include "common/imu.h"
 #include "core/lio/laser_mapping.h"
@@ -47,7 +39,7 @@ class Localization {
         int lidar_odom_skip_num_ = 1;          // 如果允许跳帧，跳多少帧
         bool enable_lidar_loc_skip_ = true;    // 是否允许激光定位跳帧
         bool enable_lidar_loc_rviz_ = false;   // 是否允许调试用rviz
-        int lidar_loc_skip_num_ = 4;           // 如果跳帧，跳多少帧
+        int lidar_loc_skip_num_ = 4;           // 如果允许跳帧，跳多少帧
         bool loc_on_kf_ = false;
     };
 
@@ -74,18 +66,24 @@ class Localization {
     /// 由外部设置pose，适用于手动重定位
     void SetExternalPose(const Eigen::Quaterniond& q, const Eigen::Vector3d& t);
 
+    /// TODO: 其他初始化逻辑
+
+    /// TODO: 处理odom消息
+
     /// 结束，保存临时地图
     void Finish();
 
     /// 异步处理函数
-    /// 注意：当前 Localization 内部实际回调的是 LocalizationResult，
-    /// 不是 geometry_msgs::msg::TransformStamped。
-    using TFCallback = std::function<void(const LocalizationResult& res)>;
+    void LidarOdomProcCloud(CloudPtr);
+    void LidarLocProcCloud(CloudPtr);
+
+    using TFCallback = std::function<void(const geometry_msgs::msg::TransformStamped& odom)>;
     using LocStateCallback = std::function<void(const std_msgs::msg::Int32& state)>;
     using PointcloudBodyCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
     using PointcloudWorldCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
 
     void SetTFCallback(TFCallback&& callback);
+
     // void SetPathCallback(std::function<void(const nav_msgs::msg::Path& path)>&& callback);
     // void SetPointcloudWorldCallback(std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>&& callback);
     // void SetPointcloudBodyCallback(std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>&& callback);
@@ -93,9 +91,6 @@ class Localization {
     // void SetHealthDiagNormalCallback(interface::health_diag_normal_callback&& callback);
 
    private:
-    void LidarOdomProcCloud(CloudPtr cloud);
-    void LidarLocProcCloud(CloudPtr scan_undist);
-
     /// 模块  ========================================================================================================
     std::mutex global_mutex_;  // 防止处理过程中被重复init
     Options options_;
@@ -136,7 +131,6 @@ class Localization {
     double last_odom_time_ = 0;
     double last_cloud_time_ = 0;
 };
-
 }  // namespace loc
-}  // namespace lightning
 
+}  // namespace lightning
