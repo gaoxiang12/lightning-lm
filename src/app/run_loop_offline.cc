@@ -6,6 +6,7 @@
 #include <glog/logging.h>
 
 #include "core/lio/laser_mapping.h"
+#include "core/lio/pointcloud_preprocess.h"
 #include "core/loop_closing/loop_closing.h"
 #include "ui/pangolin_window.h"
 #include "wrapper/bag_io.h"
@@ -35,6 +36,11 @@ int main(int argc, char** argv) {
         LOG(ERROR) << "failed to init lio";
         return -1;
     };
+    PointCloudPreprocess preprocess;
+    if (!preprocess.Init(FLAGS_config)) {
+        LOG(ERROR) << "failed to init input preprocess";
+        return -1;
+    }
 
     auto ui = std::make_shared<ui::PangolinWindow>();
     ui->Init();
@@ -52,8 +58,10 @@ int main(int argc, char** argv) {
                           return true;
                       })
         .AddPointCloud2Handle("points_raw",
-                              [&lio, &cur_kf, &loop](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
-                                  lio.ProcessPointCloud2(cloud);
+                              [&lio, &preprocess, &cur_kf, &loop](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
+                                  CloudPtr input(new PointCloudType);
+                                  preprocess.Process(cloud, input);
+                                  lio.ProcessPointCloud2(input);
                                   lio.Run();
 
                                   auto kf = lio.GetKeyframe();

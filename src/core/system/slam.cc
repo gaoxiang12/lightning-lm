@@ -5,6 +5,8 @@
 #include "core/system/slam.h"
 #include "core/g2p5/g2p5.h"
 #include "core/lio/laser_mapping.h"
+#include "core/lio/lio_sam/lio_sam_mapping.h"
+#include "core/lio/pointcloud_preprocess.h"
 #include "core/loop_closing/loop_closing.h"
 #include "core/maps/tiled_map.h"
 #include "ui/pangolin_window.h"
@@ -23,14 +25,11 @@ SlamSystem::SlamSystem(lightning::SlamSystem::Options options) : options_(option
 
 bool SlamSystem::Init(const std::string& yaml_path) {
     auto yaml = YAML::LoadFile(yaml_path);
-    std::string frontend = yaml["system"]["frontend"].as<std::string>();
+    std::string frontend = "laser_mapping";
+    if (yaml["system"]["frontend"]) {
+        frontend = yaml["system"]["frontend"].as<std::string>();
+    }
     use_lio_sam_ = frontend == "lio_sam" || frontend == "liosam";
-    
-    options_.with_loop_closing_ = yaml["system"]["with_loop_closing"].as<bool>();
-    options_.with_visualization_ = yaml["system"]["with_ui"].as<bool>();
-    options_.with_2dvisualization_ = yaml["system"]["with_2dui"].as<bool>();
-    options_.with_gridmap_ = yaml["system"]["with_g2p5"].as<bool>();
-    options_.step_on_kf_ = yaml["system"]["step_on_kf"].as<bool>();
 
     preprocess_ = std::make_shared<PointCloudPreprocess>();
     if (!preprocess_->Init(yaml_path)) {
@@ -40,7 +39,6 @@ bool SlamSystem::Init(const std::string& yaml_path) {
 
     if (use_lio_sam_) {
         lio_sam_ = std::make_shared<LioSamMapping>();
-        options_.with_loop_closing_ = false;
         if (!lio_sam_->Init(yaml_path)) {
             LOG(ERROR) << "failed to init lio_sam_ module";
             return false;
@@ -52,7 +50,18 @@ bool SlamSystem::Init(const std::string& yaml_path) {
             return false;
         }
     }
-    
+
+    options_.with_loop_closing_ = yaml["system"]["with_loop_closing"].as<bool>();
+    options_.with_visualization_ = yaml["system"]["with_ui"].as<bool>();
+    options_.with_2dvisualization_ = yaml["system"]["with_2dui"].as<bool>();
+    options_.with_gridmap_ = yaml["system"]["with_g2p5"].as<bool>();
+    options_.step_on_kf_ = yaml["system"]["step_on_kf"].as<bool>();
+
+    if (use_lio_sam_ && options_.with_loop_closing_) {
+        LOG(INFO) << "LIO-SAM uses its own loop closure; disable lightning-lm LoopClosing";
+        options_.with_loop_closing_ = false;
+    }
+
     if (options_.with_loop_closing_) {
         LOG(INFO) << "slam with loop closing";
         LoopClosing::Options options;
@@ -113,16 +122,7 @@ bool SlamSystem::Init(const std::string& yaml_path) {
         // qos.best_effort();
 
         imu_sub_ = node_->create_subscription<sensor_msgs::msg::Imu>(
-            imu_topic_, qos, [this](sensor_msgs::msg::Imu::SharedPtr msg) {
-                IMUPtr imu = std::make_shared<IMU>();
-                imu->timestamp = ToSec(msg->header.stamp);
-                imu->linear_acceleration =
-                    Vec3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
-                imu->angular_velocity =
-                    Vec3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
-
-                ProcessIMU(imu);
-            });
+            imu_topic_, qos, [this](sensor_msgs::msg::Imu::SharedPtr msg) { ProcessIMU(msg); });
 
         cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
             cloud_topic_, qos, [this](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
@@ -130,7 +130,7 @@ bool SlamSystem::Init(const std::string& yaml_path) {
             });
 
         livox_sub_ = node_->create_subscription<livox_ros_driver2::msg::CustomMsg>(
-            livox_topic_, qos, [this](livox_ros_driver2::msg::CustomMsg ::SharedPtr cloud) {
+            livox_topic_, qos, [this](livox_ros_driver2::msg::CustomMsg::SharedPtr cloud) {
                 Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
             });
 
@@ -180,7 +180,8 @@ void SlamSystem::SaveMap(const std::string& path) {
     }
 
     // auto global_map_no_loop = lio_->GetGlobalMap(true);
-    auto global_map =use_lio_sam_ ? lio_sam_->GetGlobalMap(true) : lio_->GetGlobalMap(!options_.with_loop_closing_);
+    auto global_map =
+        use_lio_sam_ ? lio_sam_->GetGlobalMap(true) : lio_->GetGlobalMap(!options_.with_loop_closing_);
     // auto global_map_raw = lio_->GetGlobalMap(!options_.with_loop_closing_, false, 0.1);
 
     TiledMap::Options tm_options;
@@ -188,6 +189,10 @@ void SlamSystem::SaveMap(const std::string& path) {
 
     TiledMap tm(tm_options);
     std::vector<Keyframe::Ptr> keyframes = use_lio_sam_ ? lio_sam_->GetAllKeyframes() : lio_->GetAllKeyframes();
+    if (keyframes.empty()) {
+        LOG(WARNING) << "no keyframes, skip map saving";
+        return;
+    }
     SE3 start_pose = keyframes.front()->GetOptPose();
     tm.ConvertFromFullPCD(global_map, start_pose, save_path);
 
@@ -257,6 +262,9 @@ void SlamSystem::ProcessIMU(const sensor_msgs::msg::Imu::SharedPtr& imu) {
     if (running_ == false) {
         return;
     }
+    if (!imu) {
+        return;
+    }
 
     IMUPtr input = std::make_shared<IMU>();
     input->timestamp = ToSec(imu->header.stamp);
@@ -277,7 +285,14 @@ void SlamSystem::ProcessIMU(const lightning::IMUPtr& imu) {
     if (running_ == false) {
         return;
     }
-    lio_->ProcessIMU(imu);
+    if (!imu) {
+        return;
+    }
+    if (use_lio_sam_) {
+        lio_sam_->ProcessIMU(imu);
+    } else {
+        lio_->ProcessIMU(imu);
+    }
 }
 
 void SlamSystem::ProcessLidar(const sensor_msgs::msg::PointCloud2::SharedPtr& cloud) {

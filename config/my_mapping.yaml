@@ -13,9 +13,9 @@ common:
 fasterlio:
   # 输入预处理：2 表示 Velodyne 格式，使用点云中每个点的相对时间戳
   lidar_type: 2
-  scan_line: 128
-  blind: 0.3
-  time_scale: 1
+  scan_line: 16
+  blind: 0
+  time_scale: 1000
   point_filter_num: 1
   height_max: 0.5
   height_min: -2.0

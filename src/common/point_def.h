@@ -8,6 +8,7 @@
 
 #include "common/eigen_types.h"
 
+#include <cstdint>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
@@ -36,9 +37,9 @@ struct PointRobotSense {
 };
 
 POINT_CLOUD_REGISTER_POINT_STRUCT(PointRobotSense,
-                                  (float, x, x)(float, y, y)(float, z, z)(float, intensity,intensity)
-                                  (std::uint16_t, ring, ring)(double, timestamp, timestamp))
-                                      
+                                  (float, x, x)(float, y, y)(float, z, z)(float, intensity,
+                                                                          intensity)(std::uint16_t, ring, ring)
+                                      (double, timestamp, timestamp))
 
 namespace velodyne_ros {
 struct EIGEN_ALIGN16 Point {

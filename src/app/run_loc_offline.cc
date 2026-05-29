@@ -11,7 +11,7 @@
 #include "wrapper/bag_io.h"
 #include "wrapper/ros_utils.h"
 
-#include "io/yaml_io.h"
+#include <yaml-cpp/yaml.h>
 
 DEFINE_string(input_bag, "", "输入数据包");
 DEFINE_string(config, "./config/default.yaml", "配置文件");
@@ -39,9 +39,9 @@ int main(int argc, char** argv) {
     loc::Localization loc(options);
     loc.Init(FLAGS_config, FLAGS_map_path);
 
-    lightning::YAML_IO yaml(FLAGS_config);
-    std::string lidar_topic = yaml.GetValue<std::string>("common", "lidar_topic");
-    std::string imu_topic = yaml.GetValue<std::string>("common", "imu_topic");
+    const YAML::Node yaml = YAML::LoadFile(FLAGS_config);
+    std::string lidar_topic = yaml["common"]["lidar_topic"].as<std::string>();
+    std::string imu_topic = yaml["common"]["imu_topic"].as<std::string>();
 
     rosbag
         .AddImuHandle(imu_topic,

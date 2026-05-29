@@ -46,10 +46,12 @@ int main(int argc, char** argv) {
 
     slam.StartSLAM("new_map");
 
-    lightning::YAML_IO yaml(FLAGS_config);
-    std::string lidar_topic = yaml.GetValue<std::string>("common", "lidar_topic");
-    std::string imu_topic = yaml.GetValue<std::string>("common", "imu_topic");
-	std::string imu_topic = yaml.GetValue<std::string>("system", "map_path");
+    const YAML::Node yaml = YAML::LoadFile(FLAGS_config);
+    std::string lidar_topic = yaml["common"]["lidar_topic"].as<std::string>();
+    std::string livox_lidar_topic = yaml["common"]["livox_lidar_topic"].as<std::string>();
+    std::string imu_topic = yaml["common"]["imu_topic"].as<std::string>();
+    std::string save_map_path = yaml["system"]["map_path"].as<std::string>();
+
     rosbag
         /// IMU 的处理
         /*
@@ -85,3 +87,4 @@ int main(int argc, char** argv) {
 
     return 0;
 }
+

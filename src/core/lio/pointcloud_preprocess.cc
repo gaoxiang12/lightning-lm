@@ -1,44 +1,39 @@
 #include "pointcloud_preprocess.h"
+#include <algorithm>
+#include <cmath>
 #include <execution>
 
 #include <glog/logging.h>
-#include "io/yaml_io.h"
+#include <yaml-cpp/yaml.h>
 
 #include "wrapper/ros_utils.h"
 
 namespace lightning {
 
 bool PointCloudPreprocess::Init(const std::string& yaml_path) {
-    
-        /// 预处理器
-    YAML_IO yaml(yaml_path);
-    
-    blind_ = yaml.GetValue<double>("fasterlio", "blind");
-    time_scale_ = yaml.GetValue<double>("fasterlio", "time_scale");
-    int lidar_type = yaml.GetValue<int>("fasterlio", "lidar_type");
-    num_scans_ = yaml.GetValue<int>("fasterlio", "scan_line");
-    point_filter_num_ = yaml.GetValue<int>("fasterlio", "point_filter_num");
-    height_max_ = yaml.GetValue<float>("roi", "height_max");
-    height_min_ = yaml.GetValue<float>("roi", "height_min");
+    try {
+        const YAML::Node yaml = YAML::LoadFile(yaml_path);
+        const YAML::Node params = yaml["fasterlio"];
 
-    LOG(INFO) << "lidar_type " << lidar_type;
-    if (lidar_type == 1) {
-        lidar_type_ = LidarType::AVIA;
-        LOG(INFO) << "Using AVIA Lidar";
-    } else if (lidar_type == 2) {
-        lidar_type_ = LidarType::VELO32;
-        LOG(INFO) << "Using Velodyne 32 Lidar";
-    } else if (lidar_type == 3) {
-        lidar_type_ = LidarType::OUST64;
-        LOG(INFO) << "Using OUST 64 Lidar";
-    } else if (lidar_type == 4) {
-        lidar_type_ = LidarType::ROBOSENSE;
-        LOG(INFO) << "Using OUST 64 Lidar";
-    } else {
-        LOG(WARNING) << "unknown lidar_type";
+        blind_ = params["blind"].as<double>();
+        time_scale_ = params["time_scale"].as<float>();
+        num_scans_ = params["scan_line"].as<int>();
+        point_filter_num_ = params["point_filter_num"].as<int>();
+        height_max_ = params["height_max"] ? params["height_max"].as<float>() : yaml["roi"]["height_max"].as<float>();
+        height_min_ = params["height_min"] ? params["height_min"].as<float>() : yaml["roi"]["height_min"].as<float>();
+
+        const int lidar_type = params["lidar_type"].as<int>();
+        if (lidar_type < static_cast<int>(LidarType::AVIA) ||
+            lidar_type > static_cast<int>(LidarType::ROBOSENSE)) {
+            LOG(ERROR) << "unknown lidar_type: " << lidar_type;
+            return false;
+        }
+        lidar_type_ = static_cast<LidarType>(lidar_type);
+        return true;
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "failed to initialize point cloud preprocess: " << e.what();
+        return false;
     }
-
-
 }
 
 void PointCloudPreprocess::Set(LidarType lid_type, double bld, int pfilt_num) {
@@ -183,7 +178,8 @@ void PointCloudPreprocess::RoboSenseHandler(const sensor_msgs::msg::PointCloud2:
 
     double head_time = msg->header.stamp.sec + msg->header.stamp.nanosec / 1e9;
 
-    /// RoboSense的时间戳是double, 均为linux时间且单位为秒，这里减去header time并乘以1000得到毫秒为单位的时间戳
+    // Header stamp and per-point timestamp are seconds on the lidar clock.
+    // The common PointType stores relative point time in milliseconds.
 
     for (int i = 0; i < pl_orig.points.size(); i++) {
         if (i % point_filter_num_ != 0) {
@@ -208,7 +204,7 @@ void PointCloudPreprocess::RoboSenseHandler(const sensor_msgs::msg::PointCloud2:
         added_pt.intensity = pl_orig.points[i].intensity;
         added_pt.ring = pl_orig.points[i].ring;
 
-        added_pt.time = (pl_orig.points[i].time - head_time) * 1e3;  //  / 1e6;  // curvature unit: ms
+        added_pt.time = (pl_orig.points[i].timestamp - head_time) * 1e3;  //  / 1e6;  // curvature unit: ms
 
         cloud_out_.points.push_back(added_pt);
     }
@@ -226,6 +222,12 @@ void PointCloudPreprocess::VelodyneHandler(const sensor_msgs::msg::PointCloud2::
     pcl::fromROSMsg(*msg, pl_orig);
     int plsize = pl_orig.points.size();
     cloud_out_.reserve(plsize);
+    if (plsize == 0) {
+        cloud_out_.width = 0;
+        cloud_out_.height = 1;
+        cloud_out_.is_dense = false;
+        return;
+    }
 
     /*** These variables only works when no point timestamps given ***/
     double omega_l = 3.61;  // scan angular velocity
