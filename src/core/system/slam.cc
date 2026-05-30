@@ -298,11 +298,15 @@ void SlamSystem::ProcessLidar(const sensor_msgs::msg::PointCloud2::SharedPtr& cl
     Keyframe::Ptr kf;
     if (use_lio_sam_) {
         lio_sam_->ProcessPointCloud2(input);
-        lio_sam_->Run();
+        if (!lio_sam_->Run()) {
+            return;
+        }        
         kf = lio_sam_->GetKeyframe();
     } else {
         lio_->ProcessPointCloud2(input);
-        lio_->Run();
+        if (!lio_->Run()) {
+            return;
+        }
         kf = lio_->GetKeyframe();
     }
     if (kf != cur_kf_) {
@@ -339,11 +343,15 @@ void SlamSystem::ProcessLidar(const livox_ros_driver2::msg::CustomMsg::SharedPtr
     Keyframe::Ptr kf;
     if (use_lio_sam_) {
         lio_sam_->ProcessPointCloud2(input);
-        lio_sam_->Run();
+        if (!lio_sam_->Run()) {
+            return;
+        }
         kf = lio_sam_->GetKeyframe();
     } else {
         lio_->ProcessPointCloud2(input);
-        lio_->Run();
+        if (!lio_->Run()) {
+            return;
+        }        
         kf = lio_->GetKeyframe();
     }
     if (kf != cur_kf_) {

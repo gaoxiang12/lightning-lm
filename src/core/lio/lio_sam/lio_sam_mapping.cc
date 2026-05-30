@@ -207,18 +207,26 @@ void LioSamMapping::ProcessPointCloud2(CloudPtr cloud) {
     native_cloud.header = cloud->header;
     native_cloud.reserve(cloud->size());
     for (const auto& source : cloud->points) {
+        if (!std::isfinite(source.x) ||
+            !std::isfinite(source.y) ||
+            !std::isfinite(source.z) ||
+            !std::isfinite(source.time)) {
+            continue;
+        }
         ::VelodynePointXYZIRT point;
         point.x = source.x;
         point.y = source.y;
         point.z = source.z;
         point.intensity = source.intensity;
         point.ring = source.ring;
+        // PointCloudPreprocess::RoboSenseHandler 输出 source.time 单位是 ms；
+        // LIO-SAM VelodynePointXYZIRT::time 需要 seconds。
         point.time = static_cast<float>(source.time * 1e-3);
         native_cloud.push_back(point);
     }
     native_cloud.height = 1;
     native_cloud.width = native_cloud.size();
-    native_cloud.is_dense = false;
+    native_cloud.is_dense = true;
     sensor_msgs::msg::PointCloud2 msg;
     pcl::toROSMsg(native_cloud, msg);
 
@@ -290,6 +298,7 @@ bool LioSamMapping::SyncPackages() {
 
         measures_.lidar_end_time = lidar_end_time_;
         lidar_pushed_ = true;
+        lo::lidar_time_interval = scan_duration;
     }
 
     if (last_timestamp_imu_ < lidar_end_time_) {
@@ -370,7 +379,7 @@ bool LioSamMapping::Run() {
     }
 
     const float* transform = map_optimization_->TransformTobeMapped();
-    state_.timestamp_ = map_optimization_->TimeLaserInfoCur();
+    state_.timestamp_ = measures_.lidar_end_time;
     state_.pos_ = Vec3d(transform[3], transform[4], transform[5]);
     state_.rot_ = RpyToSO3(transform[0], transform[1], transform[2]);
     state_.pose_is_ok_ = map_optimization_->mappingPoseReliable;
@@ -378,7 +387,6 @@ bool LioSamMapping::Run() {
 
     scan_undistort_->clear();
     if (cloud_info.cloud_deskewed) {
-        scan_undistort_->header = cloud_info.cloud_deskewed->header;
         scan_undistort_->reserve(cloud_info.cloud_deskewed->size());
         for (const auto& p : cloud_info.cloud_deskewed->points) {
             PointType pt;
@@ -386,13 +394,16 @@ bool LioSamMapping::Run() {
             pt.y = p.y;
             pt.z = p.z;
             pt.intensity = p.intensity;
+            pt.ring = 0.0;
             pt.time = 0.0;
             scan_undistort_->push_back(pt);
         }
     }
+    scan_undistort_->header.stamp = static_cast<std::uint64_t>(std::llround(measures_.lidar_begin_time * 1e9));
+    scan_undistort_->header.frame_id = measures_.cloud.header.frame_id;
     scan_undistort_->height = 1;
     scan_undistort_->width = scan_undistort_->size();
-    scan_undistort_->is_dense = false;
+    scan_undistort_->is_dense = true;
     recent_cloud_.reset(new PointCloudType(*scan_undistort_));
 
     if (ui_) {
@@ -401,7 +412,18 @@ bool LioSamMapping::Run() {
     }
 
     MakeLightningKeyframeIfNeeded();
-    SyncLightningKeyframePoses();
+    //SyncLightningKeyframePoses();
+    LOG(INFO) << "[LIO_SAM_OUTPUT] scan_header="
+          << std::setprecision(14)
+          << math::ToSec(scan_undistort_->header.stamp)
+          << ", duration=" << lo::lidar_time_interval
+          << ", loc_time="
+          << math::ToSec(scan_undistort_->header.stamp) + lo::lidar_time_interval
+          << ", state_time=" << state_.timestamp_
+          << ", begin=" << measures_.lidar_begin_time
+          << ", end=" << measures_.lidar_end_time
+          << ", scan_size=" << scan_undistort_->size()
+          << ", reliable=" << state_.lidar_odom_reliable_;    
     return true;
 }
 
@@ -411,8 +433,6 @@ bool LioSamMapping::MakeLightningKeyframeIfNeeded() {
         map_optimization_->KeyPoseSize() <= native_keyframe_count_) {
         return false;
     }
-
-    const auto pose = map_optimization_->KeyPose(map_optimization_->KeyPoseSize() - 1);
     pcl::PointCloud<::PointType>::Ptr native_cloud = map_optimization_->LatestRawCloudKeyFrame();
 
     CloudPtr cloud(new PointCloudType());
@@ -424,20 +444,15 @@ bool LioSamMapping::MakeLightningKeyframeIfNeeded() {
             pt.x = p.x;
             pt.y = p.y;
             pt.z = p.z;
-            pt.intensity = 0.0;
+            pt.intensity = p.intensity;
+            pt.ring = 0;
             pt.time = 0.0;
             cloud->push_back(pt);
         }
     }
     cloud->height = 1;
     cloud->width = cloud->size();
-    cloud->is_dense = false;
-
-    state_.timestamp_ = pose.time;
-    state_.pos_ = Vec3d(pose.x, pose.y, pose.z);
-    state_.rot_ = RpyToSO3(pose.roll, pose.pitch, pose.yaw);
-    state_.pose_is_ok_ = true;
-    state_.lidar_odom_reliable_ = true;
+    cloud->is_dense = true;
 
     auto kf = std::make_shared<Keyframe>(kf_id_++, cloud, state_);
     kf->SetLIOPose(state_.GetPose());
@@ -462,15 +477,12 @@ void LioSamMapping::SyncLightningKeyframePoses() {
     const size_t n = std::min(all_keyframes_.size(), map_optimization_->KeyPoseSize());
     for (size_t i = 0; i < n; ++i) {
         const auto pose = map_optimization_->KeyPose(i);
-        NavState state;
-        state.timestamp_ = pose.time;
-        state.pos_ = Vec3d(pose.x, pose.y, pose.z);
-        state.rot_ = RpyToSO3(pose.roll, pose.pitch, pose.yaw);
-        state.pose_is_ok_ = true;
-        state.lidar_odom_reliable_ = true;
-        all_keyframes_[i]->SetLIOPose(state.GetPose());
-        all_keyframes_[i]->SetOptPose(state.GetPose());
-        all_keyframes_[i]->SetState(state);
+        SE3 opt_pose(
+            RpyToSO3(pose.roll, pose.pitch, pose.yaw),
+            Vec3d(pose.x, pose.y, pose.z));
+
+        all_keyframes_[i]->SetLIOPose(opt_pose);
+        all_keyframes_[i]->SetOptPose(opt_pose);
     }
 }
 

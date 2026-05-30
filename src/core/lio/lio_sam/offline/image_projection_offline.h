@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/lio/lio_sam/offline/utility_offline.hpp"
-
+#include <cmath>
 struct VelodynePointXYZIRT
 {
     PCL_ADD_POINT4D
@@ -514,6 +514,16 @@ public:
     void packCloudInfo(LioSamCloudInfo& cloudInfoOut)
     {
         cloudInfo.timestamp = timeScanCur;
+        extractedCloud->header.stamp =
+        static_cast<std::uint64_t>(std::llround(timeScanCur * 1e9));
+
+        extractedCloud->height = 1;
+        extractedCloud->width = extractedCloud->size();
+        extractedCloud->is_dense = true;
+
+        // PCL header.frame_id 是 std::string，可以从 currentCloudMsg 带过来
+        extractedCloud->header.frame_id = currentCloudMsg.header.frame_id;
+
         cloudInfo.cloud_deskewed = extractedCloud;
         cloudInfoOut = cloudInfo;
         extractedCloud.reset(new pcl::PointCloud<PointType>());

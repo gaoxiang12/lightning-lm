@@ -49,7 +49,8 @@ int main(int argc, char** argv) {
     lightning::YAML_IO yaml(FLAGS_config);
     std::string lidar_topic = yaml.GetValue<std::string>("common", "lidar_topic");
     std::string imu_topic = yaml.GetValue<std::string>("common", "imu_topic");
-    std::string livox_lidar_topic = yaml.GetValue<std::string>("common", "livox_lidar_topic");
+        std::string livox_lidar_topic = yaml.GetValue<std::string>("common", "livox_lidar_topic");
+
     std::string save_map_path = yaml.GetValue<std::string>("system", "map_path");
 
     rosbag
