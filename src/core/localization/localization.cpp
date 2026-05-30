@@ -243,6 +243,10 @@ void Localization::LidarLocProcCloud(CloudPtr scan_undist) {
 
     auto res = lidar_loc_->GetLocalizationResult();
     pgo_->ProcessLidarLoc(res);
+    // UI 显示什么定位结果，RViz TF 就发布什么定位结果。
+    if (tf_callback_ && res.lidar_loc_valid_) {
+        tf_callback_(res.ToGeoMsg());
+    }
 
     if (ui_) {
         // Twi with Til, here pose means Twl, thus Til=I

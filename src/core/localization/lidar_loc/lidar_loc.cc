@@ -297,7 +297,7 @@ bool LidarLoc::InitWithFP(CloudPtr input, const SE3& fp_pose) {
     loc_inited_ = Localize(pose_esti, fitness_score, input, output_cloud);
 
     if (loc_inited_) {
-        current_timestamp_ = math::ToSec(input->header.stamp);
+        //current_timestamp_ = math::ToSec(input->header.stamp);
         localization_result_.confidence_ = fitness_score;
         current_abs_pose_ = pose_esti;
         localization_result_.pose_ = pose_esti;
@@ -328,7 +328,8 @@ bool LidarLoc::InitWithFP(CloudPtr input, const SE3& fp_pose) {
         // 添加失败历史记录
         LOG(INFO) << "init failed, score: " << fitness_score;
         fp_init_fail_pose_vec_.emplace_back(fp_pose);
-        fp_last_tried_time_ = 1e-6 * static_cast<double>(input->header.stamp);
+        //fp_last_tried_time_ = 1e-6 * static_cast<double>(input->header.stamp);
+        fp_last_tried_time_ = current_timestamp_;
     }
     return loc_inited_;
 }
@@ -844,12 +845,12 @@ bool LidarLoc::Localize(SE3& pose, double& confidence, CloudPtr input, CloudPtr 
     ndt->align(*output, guess_pose);
     trans = ndt->getFinalTransformation();
     confidence = ndt->getTransformationProbability();
-
+    /* 0530
     auto tgt = ndt->getInputTarget();
     if (!tgt->empty()) {
         pcl::io::savePCDFile("./data/tgt.pcd", *tgt);
     }
-
+    */
     if (loc_inited_ == false && confidence > options_.min_init_confidence_) {
         loc_success = true;
     } else {
