@@ -1,4 +1,36 @@
-find_package(glog REQUIRED)
+find_package(glog QUIET)
+
+if(NOT TARGET glog::glog)
+  find_path(GLOG_INCLUDE_DIR
+    NAMES glog/logging.h
+    PATHS /usr/include /usr/local/include
+  )
+
+  find_library(GLOG_LIBRARY
+    NAMES glog
+    PATHS /usr/lib/aarch64-linux-gnu /usr/lib/x86_64-linux-gnu /usr/lib /usr/local/lib
+  )
+
+  if(NOT GLOG_INCLUDE_DIR OR NOT GLOG_LIBRARY)
+    message(FATAL_ERROR "glog not found: missing glog/logging.h or libglog.so")
+  endif()
+
+  add_library(glog::glog UNKNOWN IMPORTED)
+  set_target_properties(glog::glog PROPERTIES
+    IMPORTED_LOCATION "${GLOG_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${GLOG_INCLUDE_DIR}"
+  )
+
+  set(glog_FOUND TRUE)
+  set(GLOG_FOUND TRUE)
+  set(GLOG_INCLUDE_DIRS "${GLOG_INCLUDE_DIR}")
+  set(GLOG_LIBRARIES glog::glog)
+
+  message(STATUS "glog found by fallback: ${GLOG_LIBRARY}")
+else()
+  message(STATUS "glog found by CMake package")
+endif()
+
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(yaml-cpp REQUIRED)
@@ -28,8 +60,14 @@ endif ()
 if (BUILD_WITH_MARCH_NATIVE)
     add_compile_options(-march=native)
 else ()
-    add_definitions(-msse -msse2 -msse3 -msse4 -msse4.1 -msse4.2)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse -msse2 -msse3 -msse4 -msse4.1 -msse4.2")
+
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i386|i686")
+        add_definitions(-msse -msse2 -msse3 -msse4.1 -msse4.2)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse -msse2 -msse3 -msse4.1 -msse4.2")
+        message(STATUS "Enable x86 SSE flags on ${CMAKE_SYSTEM_PROCESSOR}")
+        else()
+        message(STATUS "Disable x86 SSE flags on ${CMAKE_SYSTEM_PROCESSOR}")
+        endif()    
 endif ()
 
 include_directories(

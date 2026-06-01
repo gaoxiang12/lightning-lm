@@ -6,7 +6,7 @@
 #include "core/localization/localization.h"
 #include "io/yaml_io.h"
 #include "wrapper/ros_utils.h"
-
+#include <iomanip>
 namespace lightning {
 
 LocSystem::LocSystem(LocSystem::Options options) : options_(options) {
@@ -34,27 +34,40 @@ bool LocSystem::Init(const std::string &yaml_path) {
     cloud_topic_ = yaml.GetValue<std::string>("common", "lidar_topic");
     livox_topic_ = yaml.GetValue<std::string>("common", "livox_lidar_topic");
 
-    rclcpp::QoS qos(10);
+    auto imu_qos = rclcpp::QoS(rclcpp::KeepLast(2000));
+    imu_qos.best_effort();
+    imu_qos.durability_volatile();
+
+    auto lidar_qos = rclcpp::QoS(rclcpp::KeepLast(10));
+    lidar_qos.best_effort();
+    lidar_qos.durability_volatile();
 
     imu_sub_ = node_->create_subscription<sensor_msgs::msg::Imu>(
-        imu_topic_, qos, [this](sensor_msgs::msg::Imu::SharedPtr msg) {
+        imu_topic_, imu_qos, [this](sensor_msgs::msg::Imu::SharedPtr msg) {
             IMUPtr imu = std::make_shared<IMU>();
             imu->timestamp = ToSec(msg->header.stamp);
             imu->linear_acceleration =
                 Vec3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
-            imu->angular_velocity = Vec3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
+            imu->angular_velocity =
+                Vec3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
             imu->orientation =
                 Quatd(msg->orientation.w, msg->orientation.x, msg->orientation.y, msg->orientation.z);
+
+            static int imu_count = 0;
+            if (++imu_count % 200 == 0) {
+                LOG(INFO) << "[IMU_RECV] t=" << std::setprecision(14) << imu->timestamp;
+            }
+
             ProcessIMU(imu);
         });
 
     cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
-        cloud_topic_, qos, [this](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
+        cloud_topic_, lidar_qos, [this](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
             Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
         });
 
     livox_sub_ = node_->create_subscription<livox_ros_driver2::msg::CustomMsg>(
-        livox_topic_, qos, [this](livox_ros_driver2::msg::CustomMsg ::SharedPtr cloud) {
+        livox_topic_, lidar_qos, [this](livox_ros_driver2::msg::CustomMsg::SharedPtr cloud) {
             Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
         });
 

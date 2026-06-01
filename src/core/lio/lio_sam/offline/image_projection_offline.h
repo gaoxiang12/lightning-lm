@@ -515,7 +515,7 @@ public:
     {
         cloudInfo.timestamp = timeScanCur;
         extractedCloud->header.stamp =
-        static_cast<std::uint64_t>(std::llround(timeScanCur * 1e9));
+        static_cast<std::uint64_t>(std::llround(timeScanCur * 1e6));
 
         extractedCloud->height = 1;
         extractedCloud->width = extractedCloud->size();

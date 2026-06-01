@@ -203,8 +203,11 @@ void LioSamMapping::ProcessIMU(const IMUPtr& input) {
 }
 
 void LioSamMapping::ProcessPointCloud2(CloudPtr cloud) {
+    const double timestamp = math::ToSec(cloud->header.stamp);
+
     pcl::PointCloud<::VelodynePointXYZIRT> native_cloud;
-    native_cloud.header = cloud->header;
+    native_cloud.header.frame_id = cloud->header.frame_id;
+    native_cloud.header.stamp = static_cast<std::uint64_t>(std::llround(timestamp * 1e6));
     native_cloud.reserve(cloud->size());
     for (const auto& source : cloud->points) {
         if (!std::isfinite(source.x) ||
@@ -229,8 +232,8 @@ void LioSamMapping::ProcessPointCloud2(CloudPtr cloud) {
     native_cloud.is_dense = true;
     sensor_msgs::msg::PointCloud2 msg;
     pcl::toROSMsg(native_cloud, msg);
-
-    const double timestamp = math::ToSec(cloud->header.stamp);
+    msg.header.stamp = ToRosStamp(timestamp);
+    msg.header.frame_id = cloud->header.frame_id;
     std::lock_guard<std::mutex> lock(mtx_buffer_);
     if (timestamp < last_timestamp_lidar_) {
         LOG(ERROR) << "lio-sam lidar loop back, clear buffer";
@@ -399,7 +402,7 @@ bool LioSamMapping::Run() {
             scan_undistort_->push_back(pt);
         }
     }
-    scan_undistort_->header.stamp = static_cast<std::uint64_t>(std::llround(measures_.lidar_begin_time * 1e9));
+    scan_undistort_->header.stamp = static_cast<std::uint64_t>(std::llround(state_.timestamp_ * 1e9));
     scan_undistort_->header.frame_id = measures_.cloud.header.frame_id;
     scan_undistort_->height = 1;
     scan_undistort_->width = scan_undistort_->size();
@@ -415,10 +418,9 @@ bool LioSamMapping::Run() {
     //SyncLightningKeyframePoses();
     LOG(INFO) << "[LIO_SAM_OUTPUT] scan_header="
           << std::setprecision(14)
-          << math::ToSec(scan_undistort_->header.stamp)
+          <<  math::ToSec(scan_undistort_->header.stamp)
           << ", duration=" << lo::lidar_time_interval
-          << ", loc_time="
-          << math::ToSec(scan_undistort_->header.stamp) + lo::lidar_time_interval
+          << ", loc_time="<< measures_.lidar_end_time
           << ", state_time=" << state_.timestamp_
           << ", begin=" << measures_.lidar_begin_time
           << ", end=" << measures_.lidar_end_time

@@ -61,7 +61,7 @@ g2p5:
 system:
   frontend: "lio_sam" # options: fasterlio, lio_sam
   with_loop_closing: false # 是否需要回环检测
-  with_ui: true # 是否需要3D UI
+  with_ui: false # 是否需要3D UI
   with_2dui: false # 是否需要2D UI
   with_g2p5: false # 是否需要栅格地图
   step_on_kf: false # 是否在关键帧处暂停
@@ -71,7 +71,7 @@ system:
   enable_lidar_odom_skip: false
   lidar_loc_skip_num: 4
   lidar_odom_skip_num: 2
-  map_path: ./data/new_map/
+  map_path: /data/new_map/
   pub_tf: true
 
 loop_closing:
@@ -95,7 +95,7 @@ lidar_loc:
   update_dynamic_cloud: true
   update_kf_dis: 2.0
   update_lidar_loc_score: 2.5
-  loc_on_kf: true
+  loc_on_kf: false
   try_self_extrap: false
 maps:
   delete_when_unload: false
