@@ -60,6 +60,11 @@ class LocSystem {
     /// 实时模式下的ros2 node, subscribers
     rclcpp::Node::SharedPtr node_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_ = nullptr;
+    // 定位结果定时发布器
+    rclcpp::TimerBase::SharedPtr loc_pub_timer_ = nullptr;
+    rclcpp::CallbackGroup::SharedPtr imu_cb_group_ = nullptr;
+    rclcpp::CallbackGroup::SharedPtr lidar_cb_group_ = nullptr;
+    rclcpp::CallbackGroup::SharedPtr pub_timer_cb_group_ = nullptr;
 
     std::string imu_topic_;
     std::string cloud_topic_;

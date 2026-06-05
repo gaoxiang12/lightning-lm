@@ -41,6 +41,27 @@ bool LocSystem::Init(const std::string &yaml_path) {
     auto lidar_qos = rclcpp::QoS(rclcpp::KeepLast(10));
     lidar_qos.best_effort();
     lidar_qos.durability_volatile();
+    // 在线定位模式下，稳定发布位姿
+    imu_cb_group_ = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    lidar_cb_group_ = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    pub_timer_cb_group_ = node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
+    rclcpp::SubscriptionOptions imu_sub_options;
+    imu_sub_options.callback_group = imu_cb_group_;
+
+    rclcpp::SubscriptionOptions lidar_sub_options;
+    lidar_sub_options.callback_group = lidar_cb_group_;
+
+    using namespace std::chrono_literals;
+
+    loc_pub_timer_ = node_->create_wall_timer(
+        100ms,
+        [this]() {
+            if (loc_started_ && loc_) {
+                loc_->PublishLatestResult();
+            }
+        },
+        pub_timer_cb_group_);
 
     imu_sub_ = node_->create_subscription<sensor_msgs::msg::Imu>(
         imu_topic_, imu_qos, [this](sensor_msgs::msg::Imu::SharedPtr msg) {
@@ -59,17 +80,23 @@ bool LocSystem::Init(const std::string &yaml_path) {
             }
 
             ProcessIMU(imu);
-        });
-
+        },
+        imu_sub_options);
+        
     cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
-        cloud_topic_, lidar_qos, [this](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
+        cloud_topic_, lidar_qos,
+        [this](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
             Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
-        });
+        },
+        lidar_sub_options);
 
     livox_sub_ = node_->create_subscription<livox_ros_driver2::msg::CustomMsg>(
-        livox_topic_, lidar_qos, [this](livox_ros_driver2::msg::CustomMsg::SharedPtr cloud) {
+        livox_topic_, lidar_qos,
+        [this](livox_ros_driver2::msg::CustomMsg::SharedPtr cloud) {
             Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
-        });
+        },
+        lidar_sub_options);
+        
     // 发布定位结果
     loc_odom_pub_ = node_->create_publisher<nav_msgs::msg::Odometry>(
         "/lightning/localization/odom", 10);
@@ -140,11 +167,22 @@ void LocSystem::ProcessLidar(const livox_ros_driver2::msg::CustomMsg::SharedPtr 
         loc_->ProcessLivoxLidarMsg(cloud);
     }
 }
-
+/*
 void LocSystem::Spin() {
     if (node_ != nullptr) {
         spin(node_);
     }
 }
+*/
+void LocSystem::Spin() {
+    if (node_ == nullptr) {
+        return;
+    }
 
+    rclcpp::executors::MultiThreadedExecutor executor(
+        rclcpp::ExecutorOptions(), 4);
+
+    executor.add_node(node_);
+    executor.spin();
+}
 }  // namespace lightning

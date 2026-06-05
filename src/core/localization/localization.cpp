@@ -137,6 +137,15 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
     return true;
 }
 
+void Localization::PublishLatestResult() {
+    auto pgo = pgo_;
+    if (!pgo) {
+        return;
+    }
+
+    pgo->PublishLatestResult();
+}
+
 void Localization::ProcessLidarMsg(const sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
     UL lock(global_mutex_);
     if (lidar_loc_ == nullptr || (!use_lio_sam_ && lio_ == nullptr) ||

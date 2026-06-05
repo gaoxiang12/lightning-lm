@@ -60,6 +60,8 @@ class PGO {
 
     /// 向外发布位姿
     void PubResult();
+    /// 由外部 10Hz timer 主动发布最新定位结果
+    bool PublishLatestResult();
 
     /// debug stuffs
     void SetDebug(bool debug = true);
