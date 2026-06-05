@@ -40,6 +40,7 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
     if (use_lio_sam_) {
         LioSamMapping::Options opt_lio_sam;
         opt_lio_sam.is_in_slam_mode_ = false;
+        opt_lio_sam.online_mode_ = options_.online_mode_;
         lio_sam_ = std::make_shared<LioSamMapping>(opt_lio_sam);
         if (!lio_sam_->Init(yaml_path)) {
             LOG(ERROR) << "failed to init LIO-SAM odometry frontend";
@@ -114,6 +115,12 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
         //             double loc_fps = 1.0 / (res.timestamp_ - loc_result_.timestamp_);
         //             // LOG_EVERY_N(INFO, 10) << "loc fps: " << loc_fps;
         //         }
+        LOG(INFO) << "[TF_SOURCE] PGO_HF_OUTPUT "
+              << "t=" << std::setprecision(14) << res.timestamp_
+              << " valid=" << int(res.valid_)
+              << " lidar_loc_valid=" << int(res.lidar_loc_valid_)
+              << " confidence=" << res.confidence_
+              << " pose=" << res.pose_.translation().transpose();
 
         loc_result_ = res;
 
@@ -244,44 +251,11 @@ void Localization::LidarLocProcCloud(CloudPtr scan_undist) {
     auto res = lidar_loc_->GetLocalizationResult();
     pgo_->ProcessLidarLoc(res);
     // UI 显示什么定位结果，RViz TF 就发布什么定位结果。
-    // 注释掉tf树发布，只打印
-    /*
+    /* 注释掉TF 直发
     if (tf_callback_ && res.lidar_loc_valid_) {
         tf_callback_(res.ToGeoMsg());
     }
     */
-    static int print_count = 0;
-    if (++print_count % 5 == 0) {
-        const auto& t = res.pose_.translation();
-        const auto q = res.pose_.so3().unit_quaternion();
-        const auto rpy = res.pose_.so3().matrix().eulerAngles(0, 1, 2);
-
-        LOG(INFO) << std::fixed << std::setprecision(6)
-                << "[LIDAR_LOC_RESULT] "
-                << "time=" << res.timestamp_
-                << " valid=" << int(res.valid_)
-                << " status=" << static_cast<int>(res.status_)
-                << " lidar_loc_valid=" << int(res.lidar_loc_valid_)
-                << " lidar_loc_inlier=" << int(res.lidar_loc_inlier_)
-                << " confidence=" << res.confidence_
-                << " pos=(" << t.x() << ", " << t.y() << ", " << t.z() << ")"
-                << " rpy_deg=("
-                << rpy[0] * 180.0 / M_PI << ", "
-                << rpy[1] * 180.0 / M_PI << ", "
-                << rpy[2] * 180.0 / M_PI << ")"
-                << " quat=("
-                << q.x() << ", " << q.y() << ", " << q.z() << ", " << q.w() << ")"
-                << " lidar_loc_error_vert=" << res.lidar_loc_error_vert_
-                << " lidar_loc_error_hori=" << res.lidar_loc_error_hori_
-                << " lidar_loc_delta_t=" << res.lidar_loc_delta_t_
-                << " lidar_loc_odom_delta=" << res.lidar_loc_odom_delta_
-                << " lidar_loc_smooth=" << int(res.lidar_loc_smooth_flag_)
-                << " lidar_loc_odom_error_normal=" << int(res.lidar_loc_odom_error_normal_)
-                << " lidar_loc_odom_reliable=" << int(res.lidar_loc_odom_reliable_)
-                << " rel_pose_set=" << int(res.rel_pose_set_);
-    }
-    
-
     if (ui_) {
         // Twi with Til, here pose means Twl, thus Til=I
         ui_->UpdateScan(scan_undist, res.pose_);

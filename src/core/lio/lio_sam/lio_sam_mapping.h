@@ -17,6 +17,7 @@
 #include "common/imu.h"
 #include "common/nav_state.h"
 #include "common/options.h"
+#include "core/lio/eskf.hpp"
 
 class ImageProjection;
 class FeatureExtraction;
@@ -31,9 +32,10 @@ class PangolinWindow;
 class LioSamMapping {
    public:
     struct Options {
-        Options() : is_in_slam_mode_(true), kf_dis_th_(2.0), kf_angle_th_(15.0 * M_PI / 180.0) {}
+        Options() : is_in_slam_mode_(true),online_mode_(false), kf_dis_th_(2.0), kf_angle_th_(15.0 * M_PI / 180.0) {}
 
         bool is_in_slam_mode_;
+        bool online_mode_;
         double kf_dis_th_;
         double kf_angle_th_;
     };
@@ -55,11 +57,20 @@ class LioSamMapping {
     Keyframe::Ptr GetKeyframe() const { return last_kf_; }
     std::vector<Keyframe::Ptr> GetAllKeyframes() const { return all_keyframes_; }
     NavState GetState() const { return state_; }
+    // 0603 新增imu 外推
     NavState GetIMUState() const {
-        NavState state;
-        state.pose_is_ok_ = false;
-        return state;
+        std::lock_guard<std::mutex> lock(mtx_buffer_);
+        if (!imu_dr_inited_) {
+            NavState s;
+            s.pose_is_ok_ = false;
+            return s;
+        }
+
+        NavState s = kf_imu_.GetX();
+        s.pose_is_ok_ = true;
+        return s;
     }
+
     CloudPtr GetScanUndist() const { return scan_undistort_; }
     CloudPtr GetProjCloud() const { return scan_undistort_; }
     CloudPtr GetRecentCloud() const { return recent_cloud_; }
@@ -86,10 +97,30 @@ class LioSamMapping {
     std::unique_ptr<::FeatureExtraction> feature_extraction_;
     std::unique_ptr<::mapOptimization> map_optimization_;
 
-    std::mutex mtx_buffer_;
+    mutable std::mutex mtx_buffer_;
     std::deque<sensor_msgs::msg::PointCloud2> lidar_buffer_;
     std::deque<double> time_buffer_;
-    std::deque<sensor_msgs::msg::Imu> imu_buffer_;
+    std::deque<sensor_msgs::msg::Imu> imu_buffer_; //给 LIO-SAM 的 ImageProjection 去畸变用的 ROS IMU 消息
+
+    //0603新增imu 预测
+    // LIO-SAM 分支给 PGO 高频发布用的 IMU/DR 状态
+    ESKF kf_imu_;
+    ESKF::ProcessNoiseType imu_Q_ = ESKF::ProcessNoiseType::Zero();
+
+    bool imu_dr_inited_ = false;
+    bool imu_mean_ready_ = false;
+
+    int imu_init_count_ = 0;
+    int imu_init_min_count_ = 100;
+
+    Vec3d imu_mean_acc_ = Vec3d::Zero();
+    Vec3d imu_mean_gyr_ = Vec3d::Zero();
+
+    double last_dr_imu_time_ = -1.0;
+    double last_lio_anchor_time_ = -1.0;
+    Vec3d last_lio_anchor_pos_ = Vec3d::Zero();
+    //给 ESKF::Predict() 用的 lightning 原始 IMUPtr。
+    std::deque<IMUPtr> imu_dr_buffer_;
 
     SyncedPackage measures_;
     CloudPtr scan_undistort_{new PointCloudType()};

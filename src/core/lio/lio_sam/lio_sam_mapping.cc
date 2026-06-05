@@ -81,6 +81,12 @@ bool LioSamMapping::Init(const std::string& config_yaml) {
         owns_rclcpp_context_ = true;
     }
 
+    ESKF::Options eskf_options;
+    eskf_options.max_iterations_ = 0;
+    eskf_options.epsi_ = ESKF::StateVecType::Zero();
+    eskf_options.use_aa_ = false;
+    kf_imu_.Init(eskf_options);
+
     image_projection_ = std::make_unique<::ImageProjection>(node_options_);
     feature_extraction_ = std::make_unique<::FeatureExtraction>(node_options_);
     map_optimization_ = std::make_unique<::mapOptimization>(node_options_);
@@ -165,6 +171,26 @@ bool LioSamMapping::LoadParamsFromYAML(const std::string& yaml_path) {
         SetParamOverride(overrides, "mappingMotionMaxRollPitchDeg", params["mappingMotionMaxRollPitchDeg"].as<double>());
         SetParamOverride(overrides, "mappingFallbackIcpSkipOnBadLmMotion",
                          params["mappingFallbackIcpSkipOnBadLmMotion"].as<bool>());
+        //0603新增imu 外推功能
+         // LIO-SAM 分支没有 p_imu_，所以这里直接构造给 ESKF::Predict 使用的 IMU 过程噪声 Q。
+        // 参数沿用 fasterlio 配置，和 LaserMapping 读取的字段保持一致。
+        float gyr_cov = yaml["fasterlio"]["gyr_cov"].as<float>();
+        float acc_cov = yaml["fasterlio"]["acc_cov"].as<float>();
+        float b_gyr_cov = yaml["fasterlio"]["b_gyr_cov"].as<float>();
+        float b_acc_cov = yaml["fasterlio"]["b_acc_cov"].as<float>();
+
+        imu_Q_.setZero();
+        imu_Q_.block<3, 3>(0, 0).diagonal() = Vec3d(gyr_cov, gyr_cov, gyr_cov);
+        imu_Q_.block<3, 3>(3, 3).diagonal() = Vec3d(acc_cov, acc_cov, acc_cov);
+        imu_Q_.block<3, 3>(6, 6).diagonal() = Vec3d(b_gyr_cov, b_gyr_cov, b_gyr_cov);
+        imu_Q_.block<3, 3>(9, 9).diagonal() = Vec3d(b_acc_cov, b_acc_cov, b_acc_cov);
+
+        LOG(INFO) << "[LIO_SAM_DR] imu_Q loaded from fasterlio: "
+                  << "gyr_cov=" << gyr_cov
+                  << ", acc_cov=" << acc_cov
+                  << ", b_gyr_cov=" << b_gyr_cov
+                  << ", b_acc_cov=" << b_acc_cov
+                  << ", Q_diag=" << imu_Q_.diagonal().transpose();
 
         node_options_ = rclcpp::NodeOptions();
         node_options_.use_intra_process_comms(true);
@@ -194,12 +220,80 @@ void LioSamMapping::ProcessIMU(const IMUPtr& input) {
     std::lock_guard<std::mutex> lock(mtx_buffer_);
     if (timestamp < last_timestamp_imu_) {
         LOG(WARNING) << "lio-sam imu loop back, clear buffer";
+
+        // LIO-SAM 原始 IMU buffer
         imu_buffer_.clear();
+
+        // 新增 DR buffer
+        imu_dr_buffer_.clear();
+
+        // DR 状态重新初始化
+        imu_dr_inited_ = false;
+        imu_mean_ready_ = false;
+        imu_init_count_ = 0;
+        imu_mean_acc_.setZero();
+        imu_mean_gyr_.setZero();
+        last_dr_imu_time_ = -1.0;
     }
 
     last_timestamp_imu_ = timestamp;
     imu_count_++;
     imu_buffer_.push_back(imu);
+    // 0603新增imu外推
+    // 3. 给新增 ESKF / DR 高频预测使用
+    imu_dr_buffer_.push_back(input);
+    while (imu_dr_buffer_.size() > 2000) {
+        imu_dr_buffer_.pop_front();
+    }
+    // 4. 初始化阶段统计 IMU 均值，用于第一次设置 gravity / gyro bias
+    if (!imu_mean_ready_) {
+        imu_init_count_++;
+
+        if (imu_init_count_ == 1) {
+            imu_mean_acc_ = input->linear_acceleration;
+            imu_mean_gyr_ = input->angular_velocity;
+        } else {
+            imu_mean_acc_ += (input->linear_acceleration - imu_mean_acc_) / static_cast<double>(imu_init_count_);
+            imu_mean_gyr_ += (input->angular_velocity - imu_mean_gyr_) / static_cast<double>(imu_init_count_);
+        }
+
+        if (imu_init_count_ >= imu_init_min_count_) {
+            imu_mean_ready_ = true;
+
+            LOG(INFO) << "[LIO_SAM_DR] imu mean ready, acc="
+                      << imu_mean_acc_.transpose()
+                      << ", gyr=" << imu_mean_gyr_.transpose();
+        }
+    }
+
+    // 5. 高频 DR 预测：只有 LIO-SAM Run() 成功锚定过 kf_imu_ 后才允许 Predict
+    if (!imu_dr_inited_ || last_dr_imu_time_ <= 0.0) {
+        return;
+    }
+
+    const double dt = timestamp - last_dr_imu_time_;
+
+    if (dt <= 0.0) {
+        return;
+    }
+
+    if (dt > 0.1) {
+        LOG(WARNING) << "[LIO_SAM_DR] abnormal imu dt=" << dt
+                     << ", skip predict";
+        imu_dr_inited_ = false;
+        last_dr_imu_time_ = -1.0;
+        return;
+    }
+
+    kf_imu_.Predict(dt,
+                    imu_Q_,
+                    input->angular_velocity,
+                    input->linear_acceleration);
+
+    // Predict() 已经更新 x_，这里不再 ChangeX()。
+    // 只显式更新时间，保证 PGO 插值用的 timestamp 正确。
+    kf_imu_.SetTime(timestamp);
+    last_dr_imu_time_ = timestamp;
 }
 
 void LioSamMapping::ProcessPointCloud2(CloudPtr cloud) {
@@ -242,6 +336,24 @@ void LioSamMapping::ProcessPointCloud2(CloudPtr cloud) {
         lidar_pushed_ = false;
 
     }
+    //为了在线定位，不积攒旧帧，只处理最新的帧
+    // 只在 run_loc_online 这类在线定位模式丢旧雷达。
+    // run_loc_offline 离线定位不能丢，否则离线评估/回放不完整。
+    // run_slam_offline 建图也不能丢。
+    if (options_.online_mode_ && !options_.is_in_slam_mode_) {
+        if (!lidar_buffer_.empty()) {
+            LOG_EVERY_N(WARNING, 20)
+                << "[LIO_SAM_ONLINE_DROP] drop stale lidar in internal buffer, size="
+                << lidar_buffer_.size()
+                << ", new_t=" << std::setprecision(14) << timestamp
+                << ", latest_imu=" << last_timestamp_imu_;
+        }
+
+        lidar_buffer_.clear();
+        time_buffer_.clear();
+        lidar_pushed_ = false;
+    }
+
     scan_count_++;
     last_timestamp_lidar_ = timestamp;
     lidar_buffer_.push_back(msg);
@@ -387,7 +499,91 @@ bool LioSamMapping::Run() {
     state_.rot_ = RpyToSO3(transform[0], transform[1], transform[2]);
     state_.pose_is_ok_ = map_optimization_->mappingPoseReliable;
     state_.lidar_odom_reliable_ = map_optimization_->mappingPoseReliable;
+    //0603 imu外推,高频发布
+    if (state_.pose_is_ok_) {
+        std::lock_guard<std::mutex> lock(mtx_buffer_);
+        NavState x;
 
+        if (imu_dr_inited_) {
+            x = kf_imu_.GetX();
+        } else {
+            x = NavState();
+
+            if (imu_mean_ready_ && imu_mean_acc_.norm() > 1e-3) {
+                x.grav_ = -imu_mean_acc_ / imu_mean_acc_.norm() * 9.81;
+                x.bg_ = imu_mean_gyr_;
+            } else {
+                x.grav_ = Vec3d(0.0, 0.0, -9.81);
+                x.bg_ = Vec3d::Zero();
+            }
+
+            x.vel_ = Vec3d::Zero();
+        }
+
+        // LIO-SAM 只给 pose，不给速度。
+        // 所以速度用相邻 LIO-SAM pose 估一个，作为 IMU 外推初值。
+        if (last_lio_anchor_time_ > 0.0) {
+            const double dt_lio = state_.timestamp_ - last_lio_anchor_time_;
+            if (dt_lio > 0.02 && dt_lio < 1.0) {
+                Vec3d v_lio = (state_.pos_ - last_lio_anchor_pos_) / dt_lio;
+                if (v_lio.norm() < 5.0) {
+                    x.vel_ = v_lio;
+                }
+            }
+        }
+
+        // 用 LIO-SAM 低频优化位姿重置 DR 锚点
+        x.timestamp_ = state_.timestamp_;
+        x.pos_ = state_.pos_;
+        x.rot_ = state_.rot_;
+        x.pose_is_ok_ = true;
+        x.lidar_odom_reliable_ = state_.lidar_odom_reliable_;
+
+        kf_imu_.ChangeX(x);
+        kf_imu_.SetTime(state_.timestamp_);
+
+        imu_dr_inited_ = true;
+        last_dr_imu_time_ = state_.timestamp_;
+        last_lio_anchor_time_ = state_.timestamp_;
+        last_lio_anchor_pos_ = state_.pos_;
+
+        // replay scan end 之后已经收到的 IMU，把 kf_imu_ 追到最新 IMU 时刻
+        double t = state_.timestamp_;
+        for (const auto& imu_ptr : imu_dr_buffer_) {
+            if (imu_ptr->timestamp <= t) {
+                continue;
+            }
+
+            const double dt = imu_ptr->timestamp - t;
+            if (dt <= 0.0) {
+                continue;
+            }
+            if (dt > 0.1) {
+                LOG(WARNING) << "[LIO_SAM_DR] replay abnormal imu dt=" << dt
+                            << ", stop replay at t=" << std::setprecision(14) << t;
+                break;
+            }
+
+            kf_imu_.Predict(dt, imu_Q_, imu_ptr->angular_velocity, imu_ptr->linear_acceleration);
+            t = imu_ptr->timestamp;
+        }
+
+        kf_imu_.SetTime(t);
+        last_dr_imu_time_ = t;
+
+        static int dr_anchor_count = 0;
+        if (++dr_anchor_count % 20 == 0) {
+            const auto& dr = kf_imu_.GetX();
+            LOG(INFO) << "[LIO_SAM_DR_ANCHOR] lidar_t=" << std::setprecision(14) << state_.timestamp_
+                    << ", dr_t=" << dr.timestamp_
+                    << ", pos=" << dr.pos_.transpose()
+                    << ", vel=" << dr.vel_.transpose()
+                    << ", grav=" << dr.grav_.transpose()
+                    << ", bg=" << dr.bg_.transpose();
+        }
+    }
+
+    // 显示
     scan_undistort_->clear();
     if (cloud_info.cloud_deskewed) {
         scan_undistort_->reserve(cloud_info.cloud_deskewed->size());

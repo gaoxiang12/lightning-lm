@@ -70,13 +70,43 @@ bool LocSystem::Init(const std::string &yaml_path) {
         livox_topic_, lidar_qos, [this](livox_ros_driver2::msg::CustomMsg::SharedPtr cloud) {
             Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
         });
+    // 发布定位结果
+    loc_odom_pub_ = node_->create_publisher<nav_msgs::msg::Odometry>(
+        "/lightning/localization/odom", 10);
+
+    loc_pose_pub_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>(
+        "/lightning/localization/pose", 10);    
 
     if (options_.pub_tf_) {
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(node_);
-        loc_->SetTFCallback(
-            [this](const geometry_msgs::msg::TransformStamped &pose) { tf_broadcaster_->sendTransform(pose); });
     }
 
+    loc_->SetTFCallback([this](const geometry_msgs::msg::TransformStamped& tf_msg) {
+        if (options_.pub_tf_ && tf_broadcaster_) {
+            tf_broadcaster_->sendTransform(tf_msg);
+        }
+
+        geometry_msgs::msg::PoseStamped pose_msg;
+        pose_msg.header = tf_msg.header;
+        pose_msg.pose.position.x = tf_msg.transform.translation.x;
+        pose_msg.pose.position.y = tf_msg.transform.translation.y;
+        pose_msg.pose.position.z = tf_msg.transform.translation.z;
+        pose_msg.pose.orientation = tf_msg.transform.rotation;
+
+        if (loc_pose_pub_) {
+            loc_pose_pub_->publish(pose_msg);
+        }
+
+        nav_msgs::msg::Odometry odom_msg;
+        odom_msg.header = tf_msg.header;
+        odom_msg.child_frame_id = tf_msg.child_frame_id;
+        odom_msg.pose.pose = pose_msg.pose;
+
+        if (loc_odom_pub_) {
+            loc_odom_pub_->publish(odom_msg);
+        }
+    });
+    
     bool ret = loc_->Init(yaml_path, map_path);
     if (ret) {
         LOG(INFO) << "online loc node has been created.";
