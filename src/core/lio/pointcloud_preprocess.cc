@@ -1,9 +1,41 @@
 #include "pointcloud_preprocess.h"
 #include <execution>
-
+#include "io/yaml_io.h"
 #include <glog/logging.h>
 
 namespace lightning {
+
+bool PointCloudPreprocess::Init(const std::string& yaml_path) {
+        /// 预处理器
+    YAML_IO yaml(yaml_path);
+    blind_ = yaml.GetValue<double>("fasterlio", "blind");
+    time_scale_ = yaml.GetValue<double>("fasterlio", "time_scale");
+    int lidar_type = yaml.GetValue<int>("fasterlio", "lidar_type");
+    num_scans_ = yaml.GetValue<int>("fasterlio", "scan_line");
+    point_filter_num_ = yaml.GetValue<int>("fasterlio", "point_filter_num");
+    height_max_ = yaml.GetValue<float>("roi", "height_max");
+    height_min_ = yaml.GetValue<float>("roi", "height_min");
+
+    LOG(INFO) << "lidar_type " << lidar_type;
+    if (lidar_type == 1) {
+        lidar_type_ = LidarType::AVIA;
+        LOG(INFO) << "Using AVIA Lidar";
+    } else if (lidar_type == 2) {
+        lidar_type_ = LidarType::VELO32;
+        LOG(INFO) << "Using Velodyne 32 Lidar";
+    } else if (lidar_type == 3) {
+        lidar_type_ = LidarType::OUST64;
+        LOG(INFO) << "Using OUST 64 Lidar";
+    } else if (lidar_type == 4) {
+        lidar_type_ = LidarType::ROBOSENSE;
+        LOG(INFO) << "Using RoboSense Lidar";
+    } else {
+        LOG(WARNING) << "unknown lidar_type";
+    }
+
+    return true;
+
+}
 
 void PointCloudPreprocess::Set(LidarType lid_type, double bld, int pfilt_num) {
     lidar_type_ = lid_type;
@@ -30,6 +62,7 @@ void PointCloudPreprocess::Process(const sensor_msgs::msg::PointCloud2 ::SharedP
             break;
     }
     *pcl_out = cloud_out_;
+    pcl_out->header.stamp = ToNanoSec(msg->header.stamp);
 }
 
 void PointCloudPreprocess::Process(const livox_ros_driver2::msg::CustomMsg::SharedPtr &msg,
@@ -59,6 +92,7 @@ void PointCloudPreprocess::Process(const livox_ros_driver2::msg::CustomMsg::Shar
         cloud_full_[i].y = msg->points[i].y;
         cloud_full_[i].z = msg->points[i].z;
         cloud_full_[i].intensity = msg->points[i].reflectivity;
+        cloud_full_[i].ring = msg->points[i].line;
 
         // use curvature as time of each laser points, curvature unit: ms
         cloud_full_[i].time = msg->points[i].offset_time / double(1000000);
@@ -89,6 +123,7 @@ void PointCloudPreprocess::Process(const livox_ros_driver2::msg::CustomMsg::Shar
     cloud_out_.height = 1;
     cloud_out_.is_dense = false;
     *pcl_out = cloud_out_;
+    pcl_out->header.stamp = ToNanoSec(msg->header.stamp);
 }
 
 void PointCloudPreprocess::Oust64Handler(const sensor_msgs::msg::PointCloud2::SharedPtr &msg) {
@@ -121,6 +156,7 @@ void PointCloudPreprocess::Oust64Handler(const sensor_msgs::msg::PointCloud2::Sh
         added_pt.y = pl_orig.points[i].y;
         added_pt.z = pl_orig.points[i].z;
         added_pt.intensity = pl_orig.points[i].intensity;
+        added_pt.ring = pl_orig.points[i].ring;
 
         added_pt.time = pl_orig.points[i].t / 1e6;
         cloud_out_.points.push_back(added_pt);
@@ -143,7 +179,8 @@ void PointCloudPreprocess::RoboSenseHandler(const sensor_msgs::msg::PointCloud2:
 
     double head_time = msg->header.stamp.sec + msg->header.stamp.nanosec / 1e9;
 
-    /// RoboSense的时间戳是double, 均为linux时间且单位为秒，这里减去header time并乘以1000得到毫秒为单位的时间戳
+    // Header stamp and per-point timestamp are seconds on the lidar clock.
+    // The common PointType stores relative point time in milliseconds.
 
     for (int i = 0; i < pl_orig.points.size(); i++) {
         if (i % point_filter_num_ != 0) {
@@ -166,8 +203,9 @@ void PointCloudPreprocess::RoboSenseHandler(const sensor_msgs::msg::PointCloud2:
         added_pt.y = pl_orig.points[i].y;
         added_pt.z = pl_orig.points[i].z;
         added_pt.intensity = pl_orig.points[i].intensity;
+        added_pt.ring = pl_orig.points[i].ring;
 
-        added_pt.time = (pl_orig.points[i].timestamp - head_time) * 1e3;  //  / 1e6;  // curvature unit: ms
+        added_pt.time = (pl_orig.points[i].time - head_time) * 1e3;  //  / 1e6;  // curvature unit: ms
 
         cloud_out_.points.push_back(added_pt);
     }
@@ -216,6 +254,7 @@ void PointCloudPreprocess::VelodyneHandler(const sensor_msgs::msg::PointCloud2::
         added_pt.y = pl_orig.points[i].y;
         added_pt.z = pl_orig.points[i].z;
         added_pt.intensity = pl_orig.points[i].intensity;
+        added_pt.ring = pl_orig.points[i].ring;
         added_pt.time = pl_orig.points[i].time * time_scale_;  // curvature unit: ms
 
         if (!given_offset_time_) {

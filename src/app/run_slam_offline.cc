@@ -49,15 +49,24 @@ int main(int argc, char** argv) {
     lightning::YAML_IO yaml(FLAGS_config);
     std::string lidar_topic = yaml.GetValue<std::string>("common", "lidar_topic");
     std::string imu_topic = yaml.GetValue<std::string>("common", "imu_topic");
+        std::string livox_lidar_topic = yaml.GetValue<std::string>("common", "livox_lidar_topic");
+
+    std::string save_map_path = yaml.GetValue<std::string>("system", "map_path");
 
     rosbag
         /// IMU 的处理
+        /*
         .AddImuHandle(imu_topic,
                       [&slam](IMUPtr imu) {
                           slam.ProcessIMU(imu);
                           return true;
                       })
-
+        */
+        .AddImuHandle(imu_topic,
+                      [&slam](sensor_msgs::msg::Imu::SharedPtr imu) {
+                          slam.ProcessIMU(imu);
+                          return true;
+                      })
         /// lidar 的处理
         .AddPointCloud2Handle(lidar_topic,
                               [&slam](sensor_msgs::msg::PointCloud2::SharedPtr msg) {
@@ -65,17 +74,18 @@ int main(int argc, char** argv) {
                                   return true;
                               })
         /// livox 的处理
-        .AddLivoxCloudHandle("/livox/lidar",
+        .AddLivoxCloudHandle(livox_lidar_topic,
                              [&slam](livox_ros_driver2::msg::CustomMsg::SharedPtr cloud) {
                                  slam.ProcessLidar(cloud);
                                  return true;
                              })
         .Go();
 
-    slam.SaveMap("");
+    slam.SaveMap(save_map_path);
     Timer::PrintAll();
 
     LOG(INFO) << "done";
 
     return 0;
 }
+

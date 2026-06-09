@@ -8,6 +8,7 @@
 
 #include "common/eigen_types.h"
 
+#include <cstdint>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
@@ -17,24 +18,28 @@
 struct PointXYZIT {
     PCL_ADD_POINT4D
     PCL_ADD_INTENSITY
+    std::uint16_t ring = 0;
     double time;
     PointXYZIT() {}
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
 POINT_CLOUD_REGISTER_POINT_STRUCT(PointXYZIT,
-                                  (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(double, time, time))
+                                  (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)
+                                      (std::uint16_t, ring, ring)(double, time, time))
 struct PointRobotSense {
     PCL_ADD_POINT4D
     PCL_ADD_INTENSITY
-    double timestamp = 0;
+    std::uint16_t ring = 0;
+    double time = 0;
     PointRobotSense() {}
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
 POINT_CLOUD_REGISTER_POINT_STRUCT(PointRobotSense,
                                   (float, x, x)(float, y, y)(float, z, z)(float, intensity,
-                                                                          intensity)(double, timestamp, timestamp))
+                                                                          intensity)(std::uint16_t, ring, ring)
+                                      (double, time, time))
 
 namespace velodyne_ros {
 struct EIGEN_ALIGN16 Point {

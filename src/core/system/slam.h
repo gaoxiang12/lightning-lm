@@ -20,6 +20,8 @@
 namespace lightning {
 
 class LaserMapping;  //  lio 前端
+class LioSamMapping;
+class PointCloudPreprocess;
 class LoopClosing;   // 回环检测
 
 namespace ui {
@@ -65,6 +67,7 @@ class SlamSystem {
     void SaveMap(const std::string& path = "");
 
     /// 处理IMU
+    void ProcessIMU(const sensor_msgs::msg::Imu::SharedPtr& imu);
     void ProcessIMU(const lightning::IMUPtr& imu);
 
     /// 处理点云
@@ -80,11 +83,14 @@ class SlamSystem {
 
     Options options_;
     std::atomic_bool running_ = false;
+    bool use_lio_sam_ = false;
 
     rclcpp::Service<SaveMapService>::SharedPtr savemap_service_ = nullptr;
 
     std::string map_name_;  // 地图名
 
+    std::shared_ptr<PointCloudPreprocess> preprocess_ = nullptr;
+    std::shared_ptr<LioSamMapping> lio_sam_ = nullptr;
     std::shared_ptr<LaserMapping> lio_ = nullptr;       // lio 前端
     std::shared_ptr<LoopClosing> lc_ = nullptr;         // 回环检测
     std::shared_ptr<ui::PangolinWindow> ui_ = nullptr;  // ui

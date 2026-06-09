@@ -5,6 +5,8 @@
 
 #include "common/imu.h"
 #include "core/lio/laser_mapping.h"
+#include "core/lio/lio_sam/lio_sam_mapping.h"
+#include "core/lio/pointcloud_preprocess.h"
 #include "core/localization/localization_result.h"
 #include "core/system/async_message_process.h"
 
@@ -75,6 +77,8 @@ class Localization {
     void LidarOdomProcCloud(CloudPtr);
     void LidarLocProcCloud(CloudPtr);
 
+    void PublishLatestResult() ;
+    
     using TFCallback = std::function<void(const geometry_msgs::msg::TransformStamped& odom)>;
     using LocStateCallback = std::function<void(const std_msgs::msg::Int32& state)>;
     using PointcloudBodyCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
@@ -97,7 +101,9 @@ class Localization {
     std::shared_ptr<PointCloudPreprocess> preprocess_ = nullptr;  // point cloud preprocess
 
     /// 前端
+    bool use_lio_sam_ = false;
     std::shared_ptr<LaserMapping> lio_ = nullptr;
+    std::shared_ptr<LioSamMapping> lio_sam_ = nullptr;
     Keyframe::Ptr lio_kf_ = nullptr;
 
     // ui

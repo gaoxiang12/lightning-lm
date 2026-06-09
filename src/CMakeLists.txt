@@ -1,3 +1,17 @@
+find_package(rclcpp REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(message_filters REQUIRED)
+find_package(pcl_conversions REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(tf2_eigen REQUIRED)
+
 add_library(${PROJECT_NAME}.libs SHARED
         common/nav_state.cc
         common/constant.h
@@ -9,6 +23,7 @@ add_library(${PROJECT_NAME}.libs SHARED
 
         core/lio/eskf.cc
         core/lio/laser_mapping.cc
+        core/lio/lio_sam/lio_sam_mapping.cc
         core/lio/pointcloud_preprocess.cc
         core/loop_closing/loop_closing.cc
 
@@ -51,11 +66,14 @@ ament_target_dependencies(
         "geometry_msgs"
         "sensor_msgs"
         "nav_msgs"
+        "visualization_msgs"
         "std_srvs"
         "message_filters"
         "pcl_conversions"
         "tf2_ros"
         "tf2"
+        "tf2_geometry_msgs"
+        "tf2_eigen"
 )
 
 add_dependencies(${PROJECT_NAME}.libs
@@ -69,6 +87,7 @@ add_subdirectory(core/miao)
 target_link_libraries(${PROJECT_NAME}.libs
         ${third_party_libs}
         ${PCL_LIBRARIES}
+        gtsam
         miao.core
         miao.utils
         livox_interfaces2__rosidl_typesupport_cpp

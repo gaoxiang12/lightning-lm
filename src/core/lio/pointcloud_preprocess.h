@@ -1,11 +1,12 @@
 #ifndef FASTER_LIO_POINTCLOUD_PROCESSING_H
 #define FASTER_LIO_POINTCLOUD_PROCESSING_H
 
-#include <pcl_conversions/pcl_conversions.h>
+#include <string>
 
+#include <pcl_conversions/pcl_conversions.h>
+#include "wrapper/ros_utils.h"
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
-
 #include "common/measure_group.h"
 #include "common/point_def.h"
 #include "livox_ros_driver2/msg/custom_msg.hpp"
@@ -27,6 +28,8 @@ class PointCloudPreprocess {
 
     PointCloudPreprocess() = default;
     ~PointCloudPreprocess() = default;
+
+    bool Init(const std::string& yaml_path);
 
     /// processors
     void Process(const sensor_msgs::msg::PointCloud2 ::SharedPtr &msg, PointCloudType::Ptr &pcl_out);

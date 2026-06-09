@@ -42,21 +42,40 @@ int main(int argc, char** argv) {
     lightning::YAML_IO yaml(FLAGS_config);
     std::string lidar_topic = yaml.GetValue<std::string>("common", "lidar_topic");
     std::string imu_topic = yaml.GetValue<std::string>("common", "imu_topic");
-
+    std::string livox_topic = yaml.GetValue<std::string>("common", "livox_lidar_topic");
     rosbag
+    /*
         .AddImuHandle(imu_topic,
                       [&loc](IMUPtr imu) {
                           loc.ProcessIMUMsg(imu);
                           usleep(1000);
                           return true;
                       })
+    */
+        .AddImuHandle(imu_topic,
+            [&loc](sensor_msgs::msg::Imu::SharedPtr msg) {
+                if (!msg) {
+                    return true;
+                }
+
+                IMUPtr imu = std::make_shared<IMU>();
+                imu->timestamp = ToSec(msg->header.stamp);
+                imu->angular_velocity =Vec3d(msg->angular_velocity.x,msg->angular_velocity.y,msg->angular_velocity.z);
+                    
+                imu->linear_acceleration =Vec3d(msg->linear_acceleration.x,msg->linear_acceleration.y,msg->linear_acceleration.z);
+                imu->orientation =Quatd(msg->orientation.w,msg->orientation.x,msg->orientation.y,msg->orientation.z);
+
+                loc.ProcessIMUMsg(imu);
+                usleep(1000);
+                return true;
+            })
         .AddPointCloud2Handle(lidar_topic,
-                              [&loc](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
-                                  loc.ProcessLidarMsg(cloud);
-                                  usleep(1000);
-                                  return true;
-                              })
-        .AddLivoxCloudHandle("/livox/lidar",
+            [&loc](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
+                loc.ProcessLidarMsg(cloud);
+                usleep(1000);
+                return true;
+            })
+        .AddLivoxCloudHandle(livox_topic,
                              [&loc](livox_ros_driver2::msg::CustomMsg::SharedPtr cloud) {
                                  loc.ProcessLivoxLidarMsg(cloud);
                                  usleep(1000);

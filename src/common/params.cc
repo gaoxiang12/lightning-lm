@@ -13,9 +13,6 @@ Params::Params(const std::string& yaml_path) {
     std::cout << "Loading params from " << yaml_path << std::endl;
     auto yaml = YAML::LoadFile(yaml_path);
 
-    Vec3d lidar_T_wrt_IMU;
-    Mat3d lidar_R_wrt_IMU;
-    std::vector<double> Tol_ini;
     Sophus::SE3d Toi;
 
     try {
@@ -64,26 +61,15 @@ Params::Params(const std::string& yaml_path) {
         use_fasterlio_undistort_ = yaml["use_fasterlio_undistort"].as<bool>();
         relative_cloud_pt_time_ = yaml["relative_cloud_pt_time"].as<bool>();
 
-        Tol_ini = yaml["mapping"]["Tol"].as<std::vector<double>>();
+        
 
         auto extrinT = yaml["mapping"]["extrinsic_T"].as<std::vector<double>>();
         auto extrinR = yaml["mapping"]["extrinsic_R"].as<std::vector<double>>();
-
-        lidar_T_wrt_IMU = math::VecFromArray<double>(extrinT);
-        lidar_R_wrt_IMU = math::MatFromArray<double>(extrinR);
-
-        auto Tol_eig = math::Mat4FromArray<double>(Tol_ini);
-        SE3 Tol = SE3(Eigen::Quaterniond(Tol_eig.block<3, 3>(0, 0)).normalized(), Tol_eig.block<3, 1>(0, 3));
-        Toi = Tol * Sophus::SE3d(lidar_R_wrt_IMU, lidar_T_wrt_IMU).inverse();
-
-        Toi_ = Toi;
-        Tllold_used_input_ = Tol;
-        SE3 Til = SE3(Eigen::Quaterniond(lidar_R_wrt_IMU).normalized(), lidar_T_wrt_IMU);
-        Til = Til * Tllold_used_input_.inverse();
-        R_imu_lidar_ = Til.rotationMatrix();
-        R_lidar_imu_ = R_imu_lidar_.transpose();
-        t_imu_lidar_ = Til.translation();
-        ext_qrpy_ = Quatd(R_lidar_imu_);
+        // 变量名应修改为R_imu_lidar、t_imu_lidar，保持和 LIO-SAM 代码一致，避免混淆。Toi 是 LIO-SAM 里 IMU 到 LiDAR 的外参，保持不变。
+        t_imu_lidar_  = math::VecFromArray<double>(extrinT);
+        R_imu_lidar_  = math::MatFromArray<double>(extrinR);
+        ext_qrpy_ = Quatd(R_imu_lidar_.transpose());
+        
 
     } catch (const YAML::Exception& e) {
         std::cerr << "YAML parsing error at line " << e.mark.line + 1 << ", column " << e.mark.column + 1 << ": "

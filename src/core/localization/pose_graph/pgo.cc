@@ -139,6 +139,17 @@ void PGO::PubResult() {
         return;
     }
 }
+/// 由外部 10Hz timer 主动发布最新定位结果
+bool PGO::PublishLatestResult() {
+    UL lock(impl_->data_mutex_);
+
+    if (!high_freq_output_func_ || !impl_->result_.valid_) {
+        return false;
+    }
+
+    PubResult();
+    return true;
+}
 
 bool PGO::ProcessDR(const NavState& dr_result) {
     UL lock(impl_->data_mutex_);
@@ -166,7 +177,7 @@ bool PGO::ProcessDR(const NavState& dr_result) {
         impl_->dr_pose_queue_.pop_front();
     }
     if (!impl_->dr_pose_queue_.empty() && !is_parking_) {
-        PubResult();
+        //PubResult();
     } else if (is_parking_ && high_freq_output_func_) {
         parking_result_.timestamp_ = dr_result.timestamp_;
         high_freq_output_func_(parking_result_);
@@ -212,7 +223,7 @@ bool PGO::ProcessLidarOdom(const NavState& lio_result) {
     /// 如果LO的时间比DR更新，则发布LO的递推结果
     if (!impl_->dr_pose_queue_.empty() && lio_result.timestamp_ >= impl_->dr_pose_queue_.back().timestamp_ &&
         !is_parking_) {
-        PubResult();
+        //PubResult();
     } else if (is_parking_ && high_freq_output_func_) {
         parking_result_.timestamp_ = lio_result.timestamp_;
         high_freq_output_func_(parking_result_);
@@ -304,7 +315,7 @@ bool PGO::ProcessPGOFrame(std::shared_ptr<PGOFrame> frame) {
     }
 
     if (!impl_->dr_pose_queue_.empty() && frame->timestamp_ >= impl_->dr_pose_queue_.back().timestamp_) {
-        PubResult();
+        //PubResult();
     }
 
     return true;

@@ -11,7 +11,7 @@ endif ()
 set(CMAKE_BUILD_TYPE Release)
 
 # -------------------------------------------------------------
-# ÂØºÂÖ•Á¨¨‰∏âÊñπÂ∫ìÔºåÂêåÊó∂ÂÅö‰∏Ä‰∫õÂÖ®Â±ÄÁºñËØëÈÄâÈ°πÈÖçÁΩÆ
+# µº»Îµ⁄»˝∑Ωø‚£¨Õ¨ ±◊ˆ“ª–©»´æ÷±‡“Î—°œÓ≈‰÷√
 add_definitions("-DPCL_NO_PRECOMPILE")
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -fopenmp -fPIC -g")
@@ -25,13 +25,30 @@ if (CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif ()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
+file(MAKE_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 # set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/libs)
 # set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/libs)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(cmake/packages.cmake)
 
-# msg Âíå srv
+find_package(visualization_msgs REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(tf2_eigen REQUIRED)
+find_package(message_filters REQUIRED)
+find_package(pcl_conversions REQUIRED)
+
+# msg ∫Õ srv
+set(MY_MSG_FILES "")
+set(MSG_DIR ${PROJECT_SOURCE_DIR}/msg)
+file(GLOB_RECURSE MSG_FILES ${MSG_DIR}/*.msg)
+foreach (MSG_FILE ${MSG_FILES})
+    file(RELATIVE_PATH REL_PATH ${MSG_DIR} ${MSG_FILE})
+    list(APPEND MY_MSG_FILES ${PROJECT_SOURCE_DIR}:msg/${REL_PATH})
+endforeach ()
+
+set(MY_ACTION_FILES "")
+
 set(MY_SRV_FILES "")
 set(SRC_DIR ${PROJECT_SOURCE_DIR}/srv)
 file(GLOB_RECURSE SRC_FILES ${SRC_DIR}/*.srv)

@@ -37,7 +37,7 @@ bool LaserMapping::Init(const std::string &config_yaml) {
 
 bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
     // get params from yaml
-    int lidar_type, ivox_nearby_type;
+    int ivox_nearby_type;
     double gyr_cov, acc_cov, b_gyr_cov, b_acc_cov;
     double filter_size_scan;
 
@@ -53,11 +53,6 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
         acc_cov = yaml["fasterlio"]["acc_cov"].as<float>();
         b_gyr_cov = yaml["fasterlio"]["b_gyr_cov"].as<float>();
         b_acc_cov = yaml["fasterlio"]["b_acc_cov"].as<float>();
-        preprocess_->Blind() = yaml["fasterlio"]["blind"].as<double>();
-        preprocess_->TimeScale() = yaml["fasterlio"]["time_scale"].as<double>();
-        lidar_type = yaml["fasterlio"]["lidar_type"].as<int>();
-        preprocess_->NumScans() = yaml["fasterlio"]["scan_line"].as<int>();
-        preprocess_->PointFilterNum() = yaml["fasterlio"]["point_filter_num"].as<int>();
 
         extrinT_ = yaml["fasterlio"]["extrinsic_T"].as<std::vector<double>>();
         extrinR_ = yaml["fasterlio"]["extrinsic_R"].as<std::vector<double>>();
@@ -68,11 +63,6 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
 
         skip_lidar_num_ = yaml["fasterlio"]["skip_lidar_num"].as<int>();
         enable_skip_lidar_ = skip_lidar_num_ > 0;
-
-        float height_max = yaml["roi"]["height_max"].as<float>();
-        float height_min = yaml["roi"]["height_min"].as<float>();
-
-        preprocess_->SetHeightROI(height_max, height_min);
 
         options_.kf_dis_th_ = yaml["fasterlio"]["kf_dis_th"].as<double>();
         options_.kf_angle_th_ = yaml["fasterlio"]["kf_angle_th"].as<double>() * M_PI / 180.0;
@@ -86,24 +76,6 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
 
     } catch (...) {
         LOG(ERROR) << "bad conversion";
-        return false;
-    }
-
-    LOG(INFO) << "lidar_type " << lidar_type;
-    if (lidar_type == 1) {
-        preprocess_->SetLidarType(LidarType::AVIA);
-        LOG(INFO) << "Using AVIA Lidar";
-    } else if (lidar_type == 2) {
-        preprocess_->SetLidarType(LidarType::VELO32);
-        LOG(INFO) << "Using Velodyne 32 Lidar";
-    } else if (lidar_type == 3) {
-        preprocess_->SetLidarType(LidarType::OUST64);
-        LOG(INFO) << "Using OUST 64 Lidar";
-    } else if (lidar_type == 4) {
-        preprocess_->SetLidarType(LidarType::ROBOSENSE);
-        LOG(INFO) << "Using RoboSense Lidar";
-    } else {
-        LOG(WARNING) << "unknown lidar_type";
         return false;
     }
 
@@ -122,10 +94,10 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
 
     voxel_scan_.setLeafSize(filter_size_scan, filter_size_scan, filter_size_scan);
 
-    offset_t_lidar_fixed_ = math::VecFromArray<double>(extrinT_);
-    offset_R_lidar_fixed_ = math::MatFromArray<double>(extrinR_);
+    offset_t_imu_lidar_ = math::VecFromArray<double>(extrinT_);
+    offset_R_imu_lidar_= math::MatFromArray<double>(extrinR_);
 
-    p_imu_->SetExtrinsic(offset_t_lidar_fixed_, offset_R_lidar_fixed_);
+    p_imu_->SetExtrinsic(offset_t_imu_lidar_, offset_R_imu_lidar_);
     p_imu_->SetGyrCov(Vec3d(gyr_cov, gyr_cov, gyr_cov));
     p_imu_->SetAccCov(Vec3d(acc_cov, acc_cov, acc_cov));
     p_imu_->SetGyrBiasCov(Vec3d(b_gyr_cov, b_gyr_cov, b_gyr_cov));
@@ -134,7 +106,6 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
 }
 
 LaserMapping::LaserMapping(Options options) : options_(options) {
-    preprocess_.reset(new PointCloudPreprocess());
     p_imu_.reset(new ImuProcess());
 }
 
@@ -175,7 +146,7 @@ bool LaserMapping::Run() {
     /// IMU process, kf prediction, undistortion
     p_imu_->Process(measures_, kf_, scan_undistort_);
 
-    if (scan_undistort_->empty() || (scan_undistort_ == nullptr)) {
+    if (scan_undistort_ == nullptr || scan_undistort_->empty()) {
         LOG(WARNING) << "No point, skip this scan!";
         return false;
     }
@@ -409,54 +380,6 @@ void LaserMapping::MakeKF() {
     // }
 }
 
-void LaserMapping::ProcessPointCloud2(const sensor_msgs::msg::PointCloud2::SharedPtr &msg) {
-    UL lock(mtx_buffer_);
-    Timer::Evaluate(
-        [&, this]() {
-            scan_count_++;
-            double timestamp = ToSec(msg->header.stamp);
-            if (timestamp < last_timestamp_lidar_) {
-                LOG(ERROR) << "lidar loop back, dt: " << timestamp - last_timestamp_lidar_;
-                return;
-            }
-
-            LOG(INFO) << "get cloud at " << std::setprecision(14) << timestamp
-                      << ", latest imu: " << last_timestamp_imu_;
-
-            CloudPtr cloud(new PointCloudType());
-            preprocess_->Process(msg, cloud);
-
-            lidar_buffer_.push_back(cloud);
-            time_buffer_.push_back(timestamp);
-            last_timestamp_lidar_ = timestamp;
-        },
-        "Preprocess (Standard)");
-}
-
-void LaserMapping::ProcessPointCloud2(const livox_ros_driver2::msg::CustomMsg::SharedPtr &msg) {
-    UL lock(mtx_buffer_);
-    Timer::Evaluate(
-        [&, this]() {
-            scan_count_++;
-            double timestamp = ToSec(msg->header.stamp);
-            if (timestamp < last_timestamp_lidar_) {
-                LOG(ERROR) << "lidar loop back, clear buffer";
-                lidar_buffer_.clear();
-            }
-
-            // LOG(INFO) << "get cloud at " << std::setprecision(14) << timestamp
-            //           << ", latest imu: " << last_timestamp_imu_;
-
-            CloudPtr cloud(new PointCloudType());
-            preprocess_->Process(msg, cloud);
-
-            lidar_buffer_.push_back(cloud);
-            time_buffer_.push_back(timestamp);
-            last_timestamp_lidar_ = timestamp;
-        },
-        "Preprocess (Standard)");
-}
-
 void LaserMapping::ProcessPointCloud2(CloudPtr cloud) {
     UL lock(mtx_buffer_);
     Timer::Evaluate(
@@ -622,8 +545,8 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
 
     Timer::Evaluate(
         [&, this]() {
-            Mat3f R_wl = (s.rot_.matrix() * offset_R_lidar_fixed_).cast<float>();
-            Vec3f t_wl = (s.rot_ * offset_t_lidar_fixed_ + s.pos_).cast<float>();
+            Mat3f R_wl = (s.rot_.matrix() * offset_R_imu_lidar_).cast<float>();
+            Vec3f t_wl = (s.rot_ * offset_t_imu_lidar_ + s.pos_).cast<float>();
 
             std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const size_t &i) {
                 PointType &point_body = scan_down_body_->points[i];
@@ -696,8 +619,8 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
     }
 
     index.resize(effect_feat_surf_);
-    const Mat3f off_R = offset_R_lidar_fixed_.cast<float>();
-    const Vec3f off_t = offset_t_lidar_fixed_.cast<float>();
+    const Mat3f off_R = offset_R_imu_lidar_.cast<float>();
+    const Vec3f off_t = offset_t_imu_lidar_.cast<float>();
     const Mat3f Rt = s.rot_.matrix().transpose().cast<float>();
 
     /// 点面ICP部分
@@ -776,7 +699,7 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
             J.block<3, 3>(0, 0) = Mat3d::Identity();
 
             /// rotation 部分
-            J.block<3, 3>(0, 3) = -(s.rot_.matrix() * offset_R_lidar_fixed_) * SO3::hat(q);
+            J.block<3, 3>(0, 3) = -(s.rot_.matrix() * offset_R_imu_lidar_) * SO3::hat(q);
 
             Vec3d e = qs - nearest_points_[i][0].getVector3fMap().cast<double>();
 

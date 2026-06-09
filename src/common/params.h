@@ -76,7 +76,6 @@ struct Params {
     double imu_scale_ = 1.0;
 
     Mat3d R_imu_lidar_;  //; R_imu_lidar, IMU->Lidar, or same P in Lidar->in IMU
-    Mat3d R_lidar_imu_;  //; R_imu_lidar.transpose()
     Vec3d t_imu_lidar_;  //; t_imu_lidar, IMU->Lidar
 
     // for Livox_imu

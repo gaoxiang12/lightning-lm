@@ -30,7 +30,21 @@ Features of Lightning-LM:
     side (online localization 0.8 cores, mapping 1.2 cores, 32-line LiDAR, without UI).
 
 ## Updates
+### 2026.6.9
 
+- Replaced the front-end odometry from FAST-LIO with LIO-SAM. The original interfaces remain unchanged; only a new branch was added to address the drift and mapping failure issues caused by FAST-LIO.
+
+- This is the original mapping result using FAST-LIO. As shown below, the generated map is cluttered and lacks clear structural features.
+
+- FAST-LIO Demo
+
+![](./doc/fastlio.gif)
+
+- Mapping result after switching to the LIO-SAM branch.
+
+- LIO-SAM Demo
+
+![](./doc/lio-sam.gif)
 ### 2026.4.2
 
 - Significantly improved the stability of mapping and localization, now adapted to multi-floor data mentioned in issues

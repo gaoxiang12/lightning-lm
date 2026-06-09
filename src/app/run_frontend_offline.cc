@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
                       })
         .AddPointCloud2Handle("points_raw",
                               [&](sensor_msgs::msg::PointCloud2::SharedPtr cloud) {
-                                  lio.ProcessPointCloud2(cloud);
+                                  //lio.ProcessPointCloud2(cloud); //用不上，为了编译通过所以注释掉
                                   lio.Run();
 
                                   auto kf = lio.GetKeyframe();

@@ -15,6 +15,8 @@
 #include "common/eigen_types.h"
 #include "common/imu.h"
 #include "common/keyframe.h"
+#include <nav_msgs/msg/odometry.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
 
 namespace lightning {
 
@@ -58,6 +60,11 @@ class LocSystem {
     /// 实时模式下的ros2 node, subscribers
     rclcpp::Node::SharedPtr node_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_ = nullptr;
+    // 定位结果定时发布器
+    rclcpp::TimerBase::SharedPtr loc_pub_timer_ = nullptr;
+    rclcpp::CallbackGroup::SharedPtr imu_cb_group_ = nullptr;
+    rclcpp::CallbackGroup::SharedPtr lidar_cb_group_ = nullptr;
+    rclcpp::CallbackGroup::SharedPtr pub_timer_cb_group_ = nullptr;
 
     std::string imu_topic_;
     std::string cloud_topic_;
@@ -66,6 +73,9 @@ class LocSystem {
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_ = nullptr;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_ = nullptr;
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr livox_sub_ = nullptr;
+
+    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr loc_odom_pub_ = nullptr;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr loc_pose_pub_ = nullptr;
 };
 
 };  // namespace lightning
