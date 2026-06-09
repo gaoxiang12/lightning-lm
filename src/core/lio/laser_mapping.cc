@@ -94,10 +94,10 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
 
     voxel_scan_.setLeafSize(filter_size_scan, filter_size_scan, filter_size_scan);
 
-    offset_t_lidar_fixed_ = math::VecFromArray<double>(extrinT_);
-    offset_R_lidar_fixed_ = math::MatFromArray<double>(extrinR_);
+    offset_t_imu_lidar_ = math::VecFromArray<double>(extrinT_);
+    offset_R_imu_lidar_= math::MatFromArray<double>(extrinR_);
 
-    p_imu_->SetExtrinsic(offset_t_lidar_fixed_, offset_R_lidar_fixed_);
+    p_imu_->SetExtrinsic(offset_t_imu_lidar_, offset_R_imu_lidar_);
     p_imu_->SetGyrCov(Vec3d(gyr_cov, gyr_cov, gyr_cov));
     p_imu_->SetAccCov(Vec3d(acc_cov, acc_cov, acc_cov));
     p_imu_->SetGyrBiasCov(Vec3d(b_gyr_cov, b_gyr_cov, b_gyr_cov));
@@ -545,8 +545,8 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
 
     Timer::Evaluate(
         [&, this]() {
-            Mat3f R_wl = (s.rot_.matrix() * offset_R_lidar_fixed_).cast<float>();
-            Vec3f t_wl = (s.rot_ * offset_t_lidar_fixed_ + s.pos_).cast<float>();
+            Mat3f R_wl = (s.rot_.matrix() * offset_R_imu_lidar_).cast<float>();
+            Vec3f t_wl = (s.rot_ * offset_t_imu_lidar_ + s.pos_).cast<float>();
 
             std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const size_t &i) {
                 PointType &point_body = scan_down_body_->points[i];
@@ -619,8 +619,8 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
     }
 
     index.resize(effect_feat_surf_);
-    const Mat3f off_R = offset_R_lidar_fixed_.cast<float>();
-    const Vec3f off_t = offset_t_lidar_fixed_.cast<float>();
+    const Mat3f off_R = offset_R_imu_lidar_.cast<float>();
+    const Vec3f off_t = offset_t_imu_lidar_.cast<float>();
     const Mat3f Rt = s.rot_.matrix().transpose().cast<float>();
 
     /// 点面ICP部分
@@ -699,7 +699,7 @@ void LaserMapping::ObsModel(NavState &s, ESKF::CustomObservationModel &obs) {
             J.block<3, 3>(0, 0) = Mat3d::Identity();
 
             /// rotation 部分
-            J.block<3, 3>(0, 3) = -(s.rot_.matrix() * offset_R_lidar_fixed_) * SO3::hat(q);
+            J.block<3, 3>(0, 3) = -(s.rot_.matrix() * offset_R_imu_lidar_) * SO3::hat(q);
 
             Vec3d e = qs - nearest_points_[i][0].getVector3fMap().cast<double>();
 

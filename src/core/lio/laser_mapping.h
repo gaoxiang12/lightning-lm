@@ -112,7 +112,7 @@ class LaserMapping {
 
     inline void PointBodyToWorld(const PointType &pi, PointType &po) {
         Vec3d p_global(state_point_.rot_ *
-                           (offset_R_lidar_fixed_ * pi.getVector3fMap().cast<double>() + offset_t_lidar_fixed_) +
+                           (offset_R_imu_lidar_* pi.getVector3fMap().cast<double>() + offset_t_imu_lidar_) +
                        state_point_.pos_);
 
         po.x = p_global(0);
@@ -145,8 +145,8 @@ class LaserMapping {
     /// params
     std::vector<double> extrinT_{3, 0.0};  // lidar-imu translation
     std::vector<double> extrinR_{9, 0.0};  // lidar-imu rotation
-    Mat3d offset_R_lidar_fixed_ = Mat3d::Identity();
-    Vec3d offset_t_lidar_fixed_ = Vec3d::Zero();
+    Mat3d offset_R_imu_lidar_ = Mat3d::Identity();
+    Vec3d offset_t_imu_lidar_ = Vec3d::Zero();
     std::string map_file_path_;
 
     std::vector<Keyframe::Ptr> all_keyframes_;

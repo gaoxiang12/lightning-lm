@@ -62,8 +62,8 @@ class ImuProcess {
     std::deque<lightning::IMUPtr> imu_queue_;
 
     std::vector<Pose6D> imu_pose_;
-    Mat3d R_lidar_imu_ = Mat3d ::Identity();
-    Vec3d t_lidar_mu_ = Vec3d ::Zero();
+    Mat3d R_imu_lidar_ = Mat3d ::Identity();
+    Vec3d t_imu_lidar_ = Vec3d ::Zero();
     Vec3d mean_acc_ = Vec3d::Zero();
     Vec3d mean_gyr_ = Vec3d::Zero();
     Vec3d angvel_last_ = Vec3d ::Zero();
@@ -109,8 +109,8 @@ inline void ImuProcess::Reset() {
 }
 
 inline void ImuProcess::SetExtrinsic(const Vec3d &transl, const Mat3d &rot) {
-    t_lidar_mu_ = transl;
-    R_lidar_imu_ = rot;
+    t_imu_lidar_ = transl;
+    R_imu_lidar_ = rot;
 }
 
 inline void ImuProcess::SetGyrCov(const Vec3d &scaler) { cov_gyr_scale_ = scaler; }
@@ -296,9 +296,9 @@ inline void ImuProcess::UndistortPcl(const MeasureGroup &meas, ESKF &kf_state, C
 
             Vec3d P_i(it_pcl->x, it_pcl->y, it_pcl->z);
             Vec3d T_ei(pos_imu + vel_imu * dt + 0.5 * acc_imu * dt * dt - imu_state.pos_);
-            Vec3d p_compensate = R_lidar_imu_.transpose() *
-                                 (imu_state.rot_.inverse() * (R_i * (R_lidar_imu_ * P_i + t_lidar_mu_) + T_ei) -
-                                  t_lidar_mu_);  // not accurate!
+            Vec3d p_compensate = R_imu_lidar_.transpose() *
+                                 (imu_state.rot_.inverse() * (R_i * (R_imu_lidar_ * P_i + t_imu_lidar_) + T_ei) -
+                                  t_imu_lidar_);  // not accurate!
 
             // save Undistorted points and their rotation
             it_pcl->x = p_compensate(0);
