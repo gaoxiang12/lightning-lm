@@ -36,6 +36,7 @@ int main(int argc, char** argv) {
     slam.StartSLAM("new_map");
     slam.Spin();
 
+    slam.PrintExtrinsic();
     Timer::PrintAll();
 
     rclcpp::shutdown();

@@ -1,14 +1,14 @@
-# 针对NCLT的配置
+# 针对灵猴机器人的配置
 common:
-  dataset: "nclt"
-  lidar_topic: "points_raw"
+  dataset: "linghou"
+  lidar_topic: "/driver/lidar/point_cloud/Data"
   livox_lidar_topic: "/livox/lidar"
-  imu_topic: "imu_raw"
+  imu_topic: "/driver/imu/Data"
 
 # fasterlio 参数
 fasterlio:
-  lidar_type: 2                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR,
-  scan_line: 32
+  lidar_type: 4                # 1 for Livox, 2 for Velodyne, 3 for Ouster, 4 for RoboSense
+  scan_line: 64
   blind: 0.5                # 盲区，小于盲区距离的不会处理
   time_scale: 1e-3             # 兼容不同数据集的时间单位，仅对Velodyne LiDAR(lidar_type=2)生效
 
@@ -28,7 +28,7 @@ fasterlio:
   gyr_cov: 0.1
   b_acc_cov: 0.0001
   b_gyr_cov: 0.0001
-  extrinsic_est_en: false      # true: enable the online estimation of IMU-LiDAR extrinsic
+  extrinsic_est_en: false       # true: enable the online estimation of IMU-LiDAR extrinsic
   extrinsic_T: [ 0, 0, 0.0 ]
   extrinsic_R: [ 1, 0, 0,
                  0, 1, 0,
@@ -47,10 +47,10 @@ fasterlio:
 g2p5:
   esti_floor: false   # 是否动态估计地面
   lidar_height: 0.0   # 雷达安装高度
-  floor_height: -1.2   # 默认地面高度
-  min_th_floor: 0.50  # 距离地面这个高度的障碍物被扫入栅格地图中
+  floor_height: -0.35   # 默认地面高度
+  min_th_floor: 0.02  # 距离地面这个高度的障碍物被扫入栅格地图中
   max_th_floor: 1.0  # 距离地面这个高度的障碍物被扫入栅格地图中
-  grid_map_resolution: 0.2 # 栅格地图分辨率
+  grid_map_resolution: 0.02 # 栅格地图分辨率
 
 system:
   with_loop_closing: true # 是否需要回环检测

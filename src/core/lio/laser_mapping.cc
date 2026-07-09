@@ -84,6 +84,8 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
         p_imu_->SetUseIMUFilter(use_imu_filter);
         options_.proj_kfs_ = yaml["fasterlio"]["proj_kfs"].as<bool>();
 
+        extrinsic_est_en_ = yaml["fasterlio"]["extrinsic_est_en"].as<bool>();
+
     } catch (...) {
         LOG(ERROR) << "bad conversion";
         return false;

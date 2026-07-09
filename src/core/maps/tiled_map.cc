@@ -51,8 +51,10 @@ void TiledMap::SaveToBin(bool only_dynamic) {
             }
 
             std::string filename = options_.map_path_ + "/" + std::to_string(cp.second->id_) + ".pcd";
-            pcl::io::savePCDFileBinaryCompressed(filename,
-                                                 *math::VoxelGrid(cp.second->cloud_, options_.voxel_size_in_chunk_));
+            auto filtered = math::VoxelGrid(cp.second->cloud_, options_.voxel_size_in_chunk_);
+            filtered->width = filtered->size();
+            filtered->height = 1;
+            pcl::io::savePCDFileBinaryCompressed(filename, *filtered);
             fout << cp.second->id_ << " " << cp.first[0] << " " << cp.first[1] << " " << filename << std::endl;
         }
 
@@ -73,9 +75,10 @@ void TiledMap::SaveToBin(bool only_dynamic) {
         /// 如果同一栅格还存在动态图层，应该把动态图层也存下来
         if (cp.second->cloud_ != nullptr && !cp.second->cloud_->empty()) {
             std::string filename = options_.map_path_ + "/" + std::to_string(cp.second->id_) + "_dyn.pcd";
-            cp.second->cloud_->width = cp.second->cloud_->size();
-            pcl::io::savePCDFileBinaryCompressed(filename,
-                                                 *math::VoxelGrid(cp.second->cloud_, options_.voxel_size_in_chunk_));
+            auto filtered = math::VoxelGrid(cp.second->cloud_, options_.voxel_size_in_chunk_);
+            filtered->width = filtered->size();
+            filtered->height = 1;
+            pcl::io::savePCDFileBinaryCompressed(filename, *filtered);
         }
     }
 }

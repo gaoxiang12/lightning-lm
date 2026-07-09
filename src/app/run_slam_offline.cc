@@ -2,6 +2,9 @@
 // Created by xiang on 25-3-18.
 //
 
+#include <chrono>
+#include <thread>
+
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 
@@ -12,6 +15,7 @@
 #include "wrapper/ros_utils.h"
 
 #include "io/yaml_io.h"
+#include <pangolin/pangolin.h>
 
 DEFINE_string(input_bag, "", "输入数据包");
 DEFINE_string(config, "./config/default.yaml", "配置文件");
@@ -73,9 +77,14 @@ int main(int argc, char** argv) {
         .Go();
 
     slam.SaveMap("");
+    slam.PrintExtrinsic();
     Timer::PrintAll();
 
-    LOG(INFO) << "done";
+    LOG(INFO) << "done. Press ESC or close the window to exit.";
+
+    while (!pangolin::ShouldQuit()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
 
     return 0;
 }

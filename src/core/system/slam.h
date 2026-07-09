@@ -74,6 +74,9 @@ class SlamSystem {
     /// 实时模式下的spin
     void Spin();
 
+    /// 打印外参估计结果（如果开启了外参估计）
+    void PrintExtrinsic();
+
    private:
     /// ros端保存地图的实现
     void SaveMap(const SaveMapService::Request::SharedPtr request, SaveMapService::Response::SharedPtr response);

@@ -308,4 +308,27 @@ void SlamSystem::Spin() {
     }
 }
 
+void SlamSystem::PrintExtrinsic() {
+    if (lio_ == nullptr) {
+        return;
+    }
+
+    if (!lio_->IsExtrinsicEstEnabled()) {
+        return;
+    }
+
+    Vec3d t = lio_->GetExtrinsicT();
+    Mat3d R = lio_->GetExtrinsicR();
+
+    Eigen::Quaterniond q(R);
+    q.normalize();
+
+    LOG(INFO) << "========== Extrinsic Estimation Result ==========";
+    LOG(INFO) << "LiDAR-IMU Translation: " << t.transpose();
+    LOG(INFO) << "LiDAR-IMU Rotation (quaternion wxyz): " << q.w() << " " << q.x() << " " << q.y() << " " << q.z();
+    LOG(INFO) << "LiDAR-IMU Rotation (matrix): ";
+    LOG(INFO) << R;
+    LOG(INFO) << "==================================================";
+}
+
 }  // namespace lightning

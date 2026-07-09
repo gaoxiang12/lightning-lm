@@ -108,6 +108,12 @@ class LaserMapping {
 
     std::vector<Keyframe::Ptr> GetAllKeyframes() { return all_keyframes_; }
 
+    bool IsExtrinsicEstEnabled() const { return extrinsic_est_en_; }
+
+    Vec3d GetExtrinsicT() const { return offset_t_lidar_fixed_; }
+
+    Mat3d GetExtrinsicR() const { return offset_R_lidar_fixed_; }
+
     /**
      * 计算全局地图
      * @param use_lio_pose
@@ -190,6 +196,7 @@ class LaserMapping {
 
     /// options
     bool keep_first_imu_estimation_ = false;  // 在没有建立地图前，是否要使用前几帧的IMU状态
+    bool extrinsic_est_en_ = false;          // 是否开启在线外参估计
     double timediff_lidar_wrt_imu_ = 0.0;
     double last_timestamp_lidar_ = 0;
     double lidar_end_time_ = 0;
