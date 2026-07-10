@@ -8,12 +8,12 @@ common:
 # fasterlio 参数
 fasterlio:
   lidar_type: 4                # 1 for Livox, 2 for Velodyne, 3 for Ouster, 4 for RoboSense
-  scan_line: 64
+  scan_line: 128
   blind: 0.5                # 盲区，小于盲区距离的不会处理
   time_scale: 1e-3             # 兼容不同数据集的时间单位，仅对Velodyne LiDAR(lidar_type=2)生效
 
   skip_lidar_num: 0 # 点云的跳帧情况
-  point_filter_num: 6 # 点云采样参数
+  point_filter_num: 4 # 点云采样参数
   max_iteration: 4 # 最大迭代次数
   filter_size_scan: 0.5 # 对scan进行的降采样
   filter_size_map: 0.5
@@ -37,7 +37,7 @@ fasterlio:
   kf_dis_th: 2.0
   kf_angle_th: 5.0
 
-  enable_icp_part: false
+  enable_icp_part: true
   plane_icp_weight: 500.0
   min_pts: 300
   imu_filter: true
@@ -100,7 +100,7 @@ lidar_loc:
   try_self_extrap: false
 maps:
   delete_when_unload: false
-  dyn_cloud_policy: persistent
+  dyn_cloud_policy: long
   load_dyn_cloud: true
   load_map_size: 2
   max_pts_dyn_chunk: 100000
