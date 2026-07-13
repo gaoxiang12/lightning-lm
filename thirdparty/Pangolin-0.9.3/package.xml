@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>pangolin</name>
+  <version>0.9.3</version>
+  <description>Pangolin is a set of lightweight and portable utility libraries for prototyping 3D, numeric or video based programs and algorithms.</description>
+  <maintainer email="stevenlovegrove@gmail.com">Steven Lovegrove</maintainer>
+  <maintainer email="Rauch.Christian@gmx.de">Christian Rauch</maintainer>
+  <author     email="stevenlovegrove@gmail.com">Steven Lovegrove</author>
+  <license>MIT</license>
+
+  <buildtool_depend>cmake</buildtool_depend>
+
+  <depend>libglew-dev</depend>
+  <depend>libepoxy-dev</depend>
+  <depend>python3-dev</depend>
+  <build_depend>eigen</build_depend>
+  <depend>libpng-dev</depend>
+  <depend>libturbojpeg</depend>
+  <depend>libxkbcommon-dev</depend>
+  <depend>opengl</depend>
+  <build_depend>wayland-dev</build_depend>
+  <exec_depend>wayland</exec_depend>
+
+  <build_depend>python3-wheel</build_depend>
+
+  <test_depend>catch2</test_depend>
+
+  <export>
+    <build_type>cmake</build_type>
+  </export>
+</package>
