@@ -4,6 +4,8 @@
 
 #include <chrono>
 #include <thread>
+#include <fstream>
+#include <iomanip>
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
@@ -53,6 +55,7 @@ int main(int argc, char** argv) {
     lightning::YAML_IO yaml(FLAGS_config);
     std::string lidar_topic = yaml.GetValue<std::string>("common", "lidar_topic");
     std::string imu_topic = yaml.GetValue<std::string>("common", "imu_topic");
+    bool debug = yaml.GetValue<bool>("common", "debug");
 
     rosbag
         /// IMU 的处理
@@ -79,6 +82,27 @@ int main(int argc, char** argv) {
     slam.SaveMap("");
     slam.PrintExtrinsic();
     Timer::PrintAll();
+
+    // Save trajectory in TUM format (debug mode only)
+    if (debug) {
+        std::ofstream ofs("trajectory.txt");
+        if (ofs.is_open()) {
+            auto kfs = slam.GetAllKeyframes();
+            for (auto& kf : kfs) {
+                auto state = kf->GetState();
+                auto pose = kf->GetLIOPose();
+                Vec3d t = pose.translation();
+                Mat3d R = pose.so3().matrix();
+                Eigen::Quaterniond q(R);
+                q.normalize();
+                ofs << std::fixed << std::setprecision(9) << state.timestamp_ << " "
+                    << t.x() << " " << t.y() << " " << t.z() << " "
+                    << q.x() << " " << q.y() << " " << q.z() << " " << q.w() << "\n";
+            }
+            ofs.close();
+            LOG(INFO) << "trajectory saved to trajectory.txt (" << kfs.size() << " keyframes)";
+        }
+    }
 
     LOG(INFO) << "done. Press ESC or close the window to exit.";
 

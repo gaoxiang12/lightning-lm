@@ -17,6 +17,7 @@
 #include "core/lio/eskf.hpp"
 #include "core/lio/imu_filter.h"
 #include "core/lio/pose6d.h"
+#include "core/frontend/undistortion.h"
 #include "utils/timer.h"
 
 namespace lightning {
@@ -265,51 +266,9 @@ inline void ImuProcess::UndistortPcl(const MeasureGroup &meas, ESKF &kf_state, C
               [](const PointType &p1, const PointType &p2) { return p1.time < p2.time; });
 
     /*** undistort each lidar point (backward propagation) ***/
-    if (pcl_out->empty()) {
-        return;
-    }
-
-    auto it_pcl = pcl_out->points.end() - 1;
-    for (auto it_kp = imu_pose_.end() - 1; it_kp != imu_pose_.begin(); it_kp--) {
-        auto head = it_kp - 1;
-        auto tail = it_kp;
-        R_imu = (head->rot);
-        vel_imu = (head->vel);
-        pos_imu = (head->pos);
-        acc_imu = (tail->acc);
-        angvel_avr = (tail->gyr);
-
-        for (; it_pcl->time / double(1000) > head->offset_time && it_pcl != pcl_out->points.begin(); it_pcl--) {
-            dt = it_pcl->time / double(1000) - head->offset_time;
-
-            /// dt 有时候存在非法数据
-            if (dt < 0 || dt > lo::lidar_time_interval) {
-                // LOG(WARNING) << "find abnormal dt in cloud: " << dt;
-                continue;
-            }
-
-            /* Transform to the 'end' frame, using only the rotation
-             * Note: Compensation direction is INVERSE of Frame's moving direction
-             * So if we want to compensate a point at timestamp-i to the frame-e
-             * p_compensate = R_imu_e ^ T * (R_i * P_i + T_ei) where T_ei is represented in global frame */
-            Mat3d R_i(R_imu * math::exp(angvel_avr, dt).matrix());
-
-            Vec3d P_i(it_pcl->x, it_pcl->y, it_pcl->z);
-            Vec3d T_ei(pos_imu + vel_imu * dt + 0.5 * acc_imu * dt * dt - imu_state.pos_);
-            Vec3d p_compensate = R_lidar_imu_.transpose() *
-                                 (imu_state.rot_.inverse() * (R_i * (R_lidar_imu_ * P_i + t_lidar_mu_) + T_ei) -
-                                  t_lidar_mu_);  // not accurate!
-
-            // save Undistorted points and their rotation
-            it_pcl->x = p_compensate(0);
-            it_pcl->y = p_compensate(1);
-            it_pcl->z = p_compensate(2);
-
-            // if (it_pcl == pcl_out->points.begin()) {
-            //     break;
-            // }
-        }
-    }
+    UndistortPointCloud(pcl_out, imu_pose_,
+                        imu_state.rot_.matrix(), imu_state.pos_,
+                        R_lidar_imu_, t_lidar_mu_);
 }
 
 inline void ImuProcess::Process(const MeasureGroup &meas, ESKF &kf_state, CloudPtr &scan) {

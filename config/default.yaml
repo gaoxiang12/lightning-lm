@@ -53,6 +53,7 @@ g2p5:
   grid_map_resolution: 0.2 # 栅格地图分辨率
 
 system:
+  mapping_frontend: "aa_fasterlio"  # 建图前端: aa_fasterlio 或 fast_lio2
   with_loop_closing: true # 是否需要回环检测
   with_ui: true # 是否需要3D UI
   with_2dui: false # 是否需要2D UI
@@ -137,3 +138,18 @@ ui:
   car_width: 1.6
   car_height: 1.7
   scans: 1
+
+# FAST-LIO2 配置 (当 mapping_frontend: "fast_lio2" 时使用)
+fast_lio2:
+  lidar_type: 1                # 1=Livox, 2=Velodyne, 3=Ouster, 4=RoboSense
+  scan_line: 32
+  blind: 0.1
+  filter_size_scan: 0.5
+  filter_size_map: 0.5
+  max_iteration: 4
+  acc_cov: 0.1
+  gyr_cov: 0.1
+  b_acc_cov: 0.0001
+  b_gyr_cov: 0.0001
+  extrinsic_T: [0, 0, 0.28]
+  extrinsic_R: [1, 0, 0, 0, 1, 0, 0, 0, 1]

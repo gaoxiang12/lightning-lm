@@ -9,8 +9,14 @@ add_library(${PROJECT_NAME}.libs SHARED
 
         core/lio/eskf.cc
         core/lio/laser_mapping.cc
-        core/lio/pointcloud_preprocess.cc
+        core/frontend/pointcloud_preprocess.cc
+        core/frontend/lio_frontend.cc
+        core/fast_lio2/fastlio2_core.cc
+        core/fast_lio2/fastlio2_mapping.cc
         core/loop_closing/loop_closing.cc
+
+        # ikd-Tree (from FAST_LIO)
+        ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty/ikd-Tree/ikd_Tree.cpp
 
         core/g2p5/g2p5_map.cc
         core/g2p5/g2p5.cc
@@ -64,6 +70,8 @@ add_dependencies(${PROJECT_NAME}.libs
 )
 
 include_directories(${PROJECT_SOURCE_DIR}/src/core/miao)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty/ikd-Tree)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty/IKFoM_toolkit)
 add_subdirectory(core/miao)
 
 target_link_libraries(${PROJECT_NAME}.libs

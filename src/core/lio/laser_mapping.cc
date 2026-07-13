@@ -17,6 +17,13 @@ namespace lightning {
 
 bool LaserMapping::Init(const std::string &config_yaml) {
     LOG(INFO) << "init laser mapping from " << config_yaml;
+
+    // 读取调试开关
+    auto yaml_check = YAML::LoadFile(config_yaml);
+    if (yaml_check["common"] && yaml_check["common"]["debug"]) {
+        debug_ = yaml_check["common"]["debug"].as<bool>();
+    }
+
     if (!LoadParamsFromYAML(config_yaml)) {
         return false;
     }
@@ -42,25 +49,34 @@ bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
     double filter_size_scan;
 
     auto yaml = YAML::LoadFile(yaml_file);
+
+    // 公共参数：优先从 lio_common 读取，回退到 fasterlio
+    auto get_common = [&](const std::string& key, auto default_val) {
+        if (yaml["lio_common"] && yaml["lio_common"][key]) {
+            return yaml["lio_common"][key].as<decltype(default_val)>();
+        }
+        return yaml["fasterlio"][key].as<decltype(default_val)>();
+    };
+
     try {
-        fasterlio::NUM_MAX_ITERATIONS = yaml["fasterlio"]["max_iteration"].as<int>();
+        fasterlio::NUM_MAX_ITERATIONS = get_common("max_iteration", 4);
         fasterlio::ESTI_PLANE_THRESHOLD = yaml["fasterlio"]["esti_plane_threshold"].as<float>();
 
-        filter_size_scan = yaml["fasterlio"]["filter_size_scan"].as<float>();
-        filter_size_map_min_ = yaml["fasterlio"]["filter_size_map"].as<float>();
+        filter_size_scan = get_common("filter_size_scan", 0.5f);
+        filter_size_map_min_ = get_common("filter_size_map", 0.5f);
         keep_first_imu_estimation_ = yaml["fasterlio"]["keep_first_imu_estimation"].as<bool>();
-        gyr_cov = yaml["fasterlio"]["gyr_cov"].as<float>();
-        acc_cov = yaml["fasterlio"]["acc_cov"].as<float>();
-        b_gyr_cov = yaml["fasterlio"]["b_gyr_cov"].as<float>();
-        b_acc_cov = yaml["fasterlio"]["b_acc_cov"].as<float>();
-        preprocess_->Blind() = yaml["fasterlio"]["blind"].as<double>();
+        gyr_cov = get_common("gyr_cov", 0.1);
+        acc_cov = get_common("acc_cov", 0.1);
+        b_gyr_cov = get_common("b_gyr_cov", 0.0001);
+        b_acc_cov = get_common("b_acc_cov", 0.0001);
+        preprocess_->Blind() = get_common("blind", 0.5);
         preprocess_->TimeScale() = yaml["fasterlio"]["time_scale"].as<double>();
-        lidar_type = yaml["fasterlio"]["lidar_type"].as<int>();
-        preprocess_->NumScans() = yaml["fasterlio"]["scan_line"].as<int>();
-        preprocess_->PointFilterNum() = yaml["fasterlio"]["point_filter_num"].as<int>();
+        lidar_type = get_common("lidar_type", 4);
+        preprocess_->NumScans() = get_common("scan_line", 128);
+        preprocess_->PointFilterNum() = get_common("point_filter_num", 4);
 
-        extrinT_ = yaml["fasterlio"]["extrinsic_T"].as<std::vector<double>>();
-        extrinR_ = yaml["fasterlio"]["extrinsic_R"].as<std::vector<double>>();
+        extrinT_ = get_common("extrinsic_T", (std::vector<double>{0, 0, 0.0}));
+        extrinR_ = get_common("extrinsic_R", (std::vector<double>{1, 0, 0, 0, 1, 0, 0, 0, 1}));
 
         ivox_options_.resolution_ = yaml["fasterlio"]["ivox_grid_resolution"].as<float>();
         ivox_nearby_type = yaml["fasterlio"]["ivox_nearby_type"].as<int>();
@@ -140,32 +156,20 @@ LaserMapping::LaserMapping(Options options) : options_(options) {
     p_imu_.reset(new ImuProcess());
 }
 
-void LaserMapping::ProcessIMU(const lightning::IMUPtr &imu) {
+void LaserMapping::ProcessIMU(const IMUPtr &imu) {
+    // 先调用基类处理缓冲区
+    LIOFrontend::ProcessIMU(imu);
+
+    // 实时 IMU 预测（在两次雷达帧之间更新 UI）
     publish_count_++;
-
-    double timestamp = imu->timestamp;
-
-    UL lock(mtx_buffer_);
-    if (timestamp < last_timestamp_imu_) {
-        LOG(WARNING) << "imu loop back, clear buffer";
-        imu_buffer_.clear();
-    }
-
     if (p_imu_->IsIMUInited()) {
-        /// 更新最新imu状态
-        kf_imu_.Predict(timestamp - last_timestamp_imu_, p_imu_->Q_, imu->angular_velocity, imu->linear_acceleration);
+        double dt = imu->timestamp - last_timestamp_imu_;
+        kf_imu_.Predict(dt, p_imu_->Q_, imu->angular_velocity, imu->linear_acceleration);
 
-        // LOG(INFO) << "newest wrt lidar: " << timestamp - kf_.GetX().timestamp_;
-
-        /// 更新ui
         if (ui_) {
             ui_->UpdateNavState(kf_imu_.GetX());
         }
     }
-
-    last_timestamp_imu_ = timestamp;
-
-    imu_buffer_.emplace_back(imu);
 }
 
 bool LaserMapping::Run() {
@@ -411,135 +415,25 @@ void LaserMapping::MakeKF() {
     // }
 }
 
-void LaserMapping::ProcessPointCloud2(const sensor_msgs::msg::PointCloud2::SharedPtr &msg) {
-    UL lock(mtx_buffer_);
-    Timer::Evaluate(
-        [&, this]() {
-            scan_count_++;
-            double timestamp = ToSec(msg->header.stamp);
-            if (timestamp < last_timestamp_lidar_) {
-                LOG(ERROR) << "lidar loop back, dt: " << timestamp - last_timestamp_lidar_;
-                return;
-            }
-
-            LOG(INFO) << "get cloud at " << std::setprecision(14) << timestamp
-                      << ", latest imu: " << last_timestamp_imu_;
-
-            CloudPtr cloud(new PointCloudType());
-            preprocess_->Process(msg, cloud);
-
-            lidar_buffer_.push_back(cloud);
-            time_buffer_.push_back(timestamp);
-            last_timestamp_lidar_ = timestamp;
-        },
-        "Preprocess (Standard)");
-}
-
-void LaserMapping::ProcessPointCloud2(const livox_ros_driver2::msg::CustomMsg::SharedPtr &msg) {
-    UL lock(mtx_buffer_);
-    Timer::Evaluate(
-        [&, this]() {
-            scan_count_++;
-            double timestamp = ToSec(msg->header.stamp);
-            if (timestamp < last_timestamp_lidar_) {
-                LOG(ERROR) << "lidar loop back, clear buffer";
-                lidar_buffer_.clear();
-            }
-
-            // LOG(INFO) << "get cloud at " << std::setprecision(14) << timestamp
-            //           << ", latest imu: " << last_timestamp_imu_;
-
-            CloudPtr cloud(new PointCloudType());
-            preprocess_->Process(msg, cloud);
-
-            lidar_buffer_.push_back(cloud);
-            time_buffer_.push_back(timestamp);
-            last_timestamp_lidar_ = timestamp;
-        },
-        "Preprocess (Standard)");
-}
-
-void LaserMapping::ProcessPointCloud2(CloudPtr cloud) {
-    UL lock(mtx_buffer_);
-    Timer::Evaluate(
-        [&, this]() {
-            scan_count_++;
-
-            double timestamp = math::ToSec(cloud->header.stamp);
-            if (timestamp < last_timestamp_lidar_) {
-                LOG(ERROR) << "lidar loop back, clear buffer";
-                lidar_buffer_.clear();
-            }
-
-            lidar_buffer_.push_back(cloud);
-            time_buffer_.push_back(timestamp);
-            last_timestamp_lidar_ = timestamp;
-        },
-        "Preprocess (Standard)");
-}
-
 bool LaserMapping::SyncPackages() {
-    if (lidar_buffer_.empty() || imu_buffer_.empty()) {
-        LOG(INFO) << "lidar or imu is empty";
+    // 调用基类公共同步逻辑（检查缓冲区、计算 lidar_end_time_、收集 IMU）
+    if (!LIOFrontend::SyncPackages()) {
         return false;
     }
 
-    /*** push a lidar scan ***/
-    if (!lidar_pushed_) {
-        measures_.scan_ = lidar_buffer_.front();
-        measures_.lidar_begin_time_ = time_buffer_.front();
+    /*** 填充 MeasureGroup ***/
+    measures_.scan_ = lidar_buffer_.front();
+    measures_.lidar_begin_time_ = time_buffer_.front();
+    measures_.lidar_end_time_ = lidar_end_time_;
 
-        if (measures_.scan_->points.size() <= 1) {
-            LOG(WARNING) << "Too few input point cloud!";
-            lidar_end_time_ = measures_.lidar_begin_time_ + lidar_mean_scantime_;
-        } else if (measures_.scan_->points.back().time / double(1000) < 0.5 * lidar_mean_scantime_) {
-            lidar_end_time_ = measures_.lidar_begin_time_ + lidar_mean_scantime_;
-        } else {
-            scan_num_++;
-            lidar_end_time_ = measures_.lidar_begin_time_ + measures_.scan_->points.back().time / double(1000);
-
-            lidar_mean_scantime_ +=
-                (measures_.scan_->points.back().time / double(1000) - lidar_mean_scantime_) / scan_num_;
-
-            if ((lidar_end_time_ - measures_.lidar_begin_time_) > 5 * lo::lidar_time_interval) {
-                /// timestamp 有异常
-                lidar_end_time_ = measures_.lidar_begin_time_ + lo::lidar_time_interval;
-                lidar_mean_scantime_ = lo::lidar_time_interval;
-            }
-        }
-
-        lo::lidar_time_interval = lidar_mean_scantime_;
-
-        // LOG(INFO) << "recompute lidar end time: " << std::setprecision(14) << lidar_end_time_;
-        measures_.lidar_end_time_ = lidar_end_time_;
-        lidar_pushed_ = true;
-    }
-
-    if (last_timestamp_imu_ < lidar_end_time_) {
-        LOG(INFO) << "sync failed: " << std::setprecision(14) << last_timestamp_imu_ << ", " << lidar_end_time_;
-        return false;
-    }
-
-    /*** push imu_ data, and pop from imu_ buffer ***/
-    double imu_time = imu_buffer_.front()->timestamp;
+    // 使用基类同步的 IMU 数据
     measures_.imu_.clear();
-    while ((!imu_buffer_.empty()) && (imu_time < lidar_end_time_)) {
-        imu_time = imu_buffer_.front()->timestamp;
-        if (imu_time > lidar_end_time_) {
-            break;
-        }
+    measures_.imu_.insert(measures_.imu_.end(), synced_imu_.begin(), synced_imu_.end());
 
-        measures_.imu_.push_back(imu_buffer_.front());
-
-        imu_buffer_.pop_front();
-    }
-
+    // 弹出已处理的雷达帧
     lidar_buffer_.pop_front();
     time_buffer_.pop_front();
     lidar_pushed_ = false;
-
-    // LOG(INFO) << "sync: " << std::setprecision(14) << measures_.lidar_begin_time_ << ", " <<
-    // measures_.lidar_end_time_;
 
     return true;
 }
@@ -873,6 +767,25 @@ CloudPtr LaserMapping::GetProjCloud() {
     auto cloud = scan_undistort_;
     ProjectKFs(cloud);
     return cloud;
+}
+
+void LaserMapping::PrintExtrinsic() {
+    if (!extrinsic_est_en_) {
+        return;
+    }
+
+    Vec3d t = offset_t_lidar_fixed_;
+    Mat3d R = offset_R_lidar_fixed_;
+
+    Eigen::Quaterniond q(R);
+    q.normalize();
+
+    LOG(INFO) << "========== Extrinsic Estimation Result ==========";
+    LOG(INFO) << "LiDAR-IMU Translation: " << t.transpose();
+    LOG(INFO) << "LiDAR-IMU Rotation (quaternion wxyz): " << q.w() << " " << q.x() << " " << q.y() << " " << q.z();
+    LOG(INFO) << "LiDAR-IMU Rotation (matrix): ";
+    LOG(INFO) << R;
+    LOG(INFO) << "==================================================";
 }
 
 }  // namespace lightning

@@ -1,4 +1,4 @@
-#include "pointcloud_preprocess.h"
+#include "core/frontend/pointcloud_preprocess.h"
 #include <execution>
 
 #include <glog/logging.h>
@@ -167,7 +167,7 @@ void PointCloudPreprocess::RoboSenseHandler(const sensor_msgs::msg::PointCloud2:
         added_pt.z = pl_orig.points[i].z;
         added_pt.intensity = pl_orig.points[i].intensity;
 
-        added_pt.time = (pl_orig.points[i].timestamp - head_time) * 1e3;  //  / 1e6;  // curvature unit: ms
+        added_pt.time = (pl_orig.points[i].timestamp / 1e9 - head_time) * 1e3;  // timestamp: ns → s, then to ms
 
         cloud_out_.points.push_back(added_pt);
     }

@@ -4,60 +4,58 @@ common:
   lidar_topic: "points_raw"
   livox_lidar_topic: "/livox/lidar"
   imu_topic: "imu_raw"
+  debug: false                    # 调试模式：打印详细日志
 
-# fasterlio 参数
+# ====== LIO 公共参数 (两种前端共用) ======
+lio_common:
+  lidar_type: 2                # 1=Livox, 2=Velodyne, 3=Ouster, 4=RoboSense
+  scan_line: 32                # 雷达线数
+  blind: 0.5                   # 盲区距离
+  point_filter_num: 6          # 点云降采样（每 N 个点保留 1 个）
+  filter_size_scan: 0.5        # 体素降采样分辨率
+  filter_size_map: 0.5         # 地图体素分辨率
+  max_iteration: 4             # EKF 最大迭代次数
+  acc_cov: 0.1                 # 加速度计噪声协方差
+  gyr_cov: 0.1                 # 陀螺仪噪声协方差
+  b_acc_cov: 0.0001            # 加速度计偏置协方差
+  b_gyr_cov: 0.0001            # 陀螺仪偏置协方差
+  extrinsic_T: [0, 0, 0.0]    # LiDAR-IMU 平移
+  extrinsic_R: [1, 0, 0, 0, 1, 0, 0, 0, 1]  # LiDAR-IMU 旋转（单位阵）
+
+# ====== fasterlio 专用参数 ======
 fasterlio:
-  lidar_type: 2                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR,
-  scan_line: 32
-  blind: 0.5                # 盲区，小于盲区距离的不会处理
-  time_scale: 1e-3             # 兼容不同数据集的时间单位，仅对Velodyne LiDAR(lidar_type=2)生效
-
-  skip_lidar_num: 0 # 点云的跳帧情况
-  point_filter_num: 6 # 点云采样参数
-  max_iteration: 4 # 最大迭代次数
-  filter_size_scan: 0.5 # 对scan进行的降采样
-  filter_size_map: 0.5
-
-  ivox_grid_resolution: 0.5        # default=0.2
-  ivox_nearby_type: 18             # 6, 18, 26
-  esti_plane_threshold: 0.1        # default=0.1
-
-  use_aa: false  # use anderson-acceleration
-
-  acc_cov: 0.1
-  gyr_cov: 0.1
-  b_acc_cov: 0.0001
-  b_gyr_cov: 0.0001
-  extrinsic_est_en: false      # true: enable the online estimation of IMU-LiDAR extrinsic
-  extrinsic_T: [ 0, 0, 0.0 ]
-  extrinsic_R: [ 1, 0, 0,
-                 0, 1, 0,
-                 0, 0, 1 ]
+  time_scale: 1e-3             # 时间缩放，仅对 Velodyne(lidar_type=2) 生效
+  skip_lidar_num: 0            # 点云跳帧
+  ivox_grid_resolution: 0.5    # iVox 网格分辨率
+  ivox_nearby_type: 18         # iVox 搜索邻居数 (6, 18, 26)
+  esti_plane_threshold: 0.1    # 平面估计阈值
+  use_aa: false                # Anderson 加速
+  extrinsic_est_en: false      # 在线外参估计
   keep_first_imu_estimation: false
-  kf_dis_th: 2.0
-  kf_angle_th: 5.0
-
-  enable_icp_part: false
-  plane_icp_weight: 500.0
-  min_pts: 300
-  imu_filter: true
-  proj_kfs: false
+  kf_dis_th: 2.0               # 关键帧距离阈值
+  kf_angle_th: 5.0             # 关键帧角度阈值 (度)
+  enable_icp_part: false       # 点到点 ICP（NCLT 数据集关闭）
+  plane_icp_weight: 500.0      # 点到面 ICP 权重
+  min_pts: 300                 # 最小特征点数
+  imu_filter: true             # IMU 低通滤波
+  proj_kfs: false              # 关键帧投影
 
 
 g2p5:
-  esti_floor: false   # 是否动态估计地面
-  lidar_height: 0.0   # 雷达安装高度
-  floor_height: -1.2   # 默认地面高度
-  min_th_floor: 0.50  # 距离地面这个高度的障碍物被扫入栅格地图中
-  max_th_floor: 1.0  # 距离地面这个高度的障碍物被扫入栅格地图中
-  grid_map_resolution: 0.2 # 栅格地图分辨率
+  esti_floor: false
+  lidar_height: 0.0
+  floor_height: -1.2
+  min_th_floor: 0.50
+  max_th_floor: 1.0
+  grid_map_resolution: 0.2
 
 system:
-  with_loop_closing: true # 是否需要回环检测
-  with_ui: true # 是否需要3D UI
-  with_2dui: true # 是否需要2D UI
-  with_g2p5: true # 是否需要栅格地图
-  step_on_kf: false # 是否在关键帧处暂停
+  mapping_frontend: "aa_fasterlio"  # 建图前端: aa_fasterlio 或 fast_lio2
+  with_loop_closing: true
+  with_ui: true
+  with_2dui: true
+  with_g2p5: true
+  step_on_kf: false
 
   enable_lidar_loc_skip: false
   enable_lidar_loc_rviz: false
@@ -68,15 +66,14 @@ system:
   pub_tf: true
 
 loop_closing:
-  loop_kf_gap: 50       # 每隔多少个关键帧检查一次
-  min_id_interval: 20   # 被检查的关键帧ID间隔
-  closest_id_th: 50     # 历史关键帧与当前帧的ID间隔
-  max_range: 30.0       # 候选帧的最大距离
-  ndt_score_th: 1.0     # ndt位姿分值
+  loop_kf_gap: 50
+  min_id_interval: 20
+  closest_id_th: 50
+  max_range: 30.0
+  ndt_score_th: 1.0
   with_height: true
 
 
-### localization ================================================================================================
 lidar_loc:
   enable_dynamic_polygon: false
   enable_parking_static: true
@@ -98,6 +95,7 @@ lidar_loc:
   update_lidar_loc_score: 2.5
   loc_on_kf: true
   try_self_extrap: false
+
 maps:
   delete_when_unload: false
   dyn_cloud_policy: persistent
@@ -108,6 +106,7 @@ maps:
   save_dyn_when_unload: false
   unload_map_size: 4
   with_dyn_area: false
+
 pgo:
   dr_ang_noise: 0.5
   dr_pos_noise: 1.0
@@ -126,11 +125,13 @@ pgo:
   rtk_other_pos_noise: 5.0
   rtk_outlier_th: 1.0
   smooth_factor: 0.01
+
 roi:
   height_max: 5.0
   height_min: -2.0
   range_max: 70
   range_min: 3.0
+
 ui:
   car_length: 2.0
   car_width: 1.6

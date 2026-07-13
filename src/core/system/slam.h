@@ -16,10 +16,10 @@
 #include "common/eigen_types.h"
 #include "common/imu.h"
 #include "common/keyframe.h"
+#include "core/frontend/lio_frontend.h"
 
 namespace lightning {
 
-class LaserMapping;  //  lio 前端
 class LoopClosing;   // 回环检测
 
 namespace ui {
@@ -77,6 +77,9 @@ class SlamSystem {
     /// 打印外参估计结果（如果开启了外参估计）
     void PrintExtrinsic();
 
+    /// 获取所有关键帧
+    std::vector<Keyframe::Ptr> GetAllKeyframes();
+
    private:
     /// ros端保存地图的实现
     void SaveMap(const SaveMapService::Request::SharedPtr request, SaveMapService::Response::SharedPtr response);
@@ -88,7 +91,7 @@ class SlamSystem {
 
     std::string map_name_;  // 地图名
 
-    std::shared_ptr<LaserMapping> lio_ = nullptr;       // lio 前端
+    std::shared_ptr<LIOFrontend> lio_ = nullptr;        // lio 前端 (多态)
     std::shared_ptr<LoopClosing> lc_ = nullptr;         // 回环检测
     std::shared_ptr<ui::PangolinWindow> ui_ = nullptr;  // ui
     std::shared_ptr<g2p5::G2P5> g2p5_ = nullptr;        // 栅格地图

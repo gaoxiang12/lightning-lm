@@ -5,6 +5,7 @@
 #include "core/system/slam.h"
 #include "core/g2p5/g2p5.h"
 #include "core/lio/laser_mapping.h"
+#include "core/fast_lio2/fastlio2_mapping.h"
 #include "core/loop_closing/loop_closing.h"
 #include "core/maps/tiled_map.h"
 #include "ui/pangolin_window.h"
@@ -22,13 +23,30 @@ SlamSystem::SlamSystem(lightning::SlamSystem::Options options) : options_(option
 }
 
 bool SlamSystem::Init(const std::string& yaml_path) {
-    lio_ = std::make_shared<LaserMapping>();
+    auto yaml = YAML::LoadFile(yaml_path);
+
+    // 根据配置选择前端
+    std::string frontend_type = "aa_fasterlio";
+    if (yaml["system"]["mapping_frontend"]) {
+        frontend_type = yaml["system"]["mapping_frontend"].as<std::string>();
+    }
+
+    if (frontend_type == "aa_fasterlio") {
+        LOG(INFO) << "using AA-FasterLIO frontend";
+        lio_ = std::make_shared<LaserMapping>();
+    } else if (frontend_type == "fast_lio2") {
+        LOG(INFO) << "using FAST-LIO2 frontend";
+        lio_ = std::make_shared<FASTLIO2Mapping>();
+    } else {
+        LOG(ERROR) << "unknown frontend type: " << frontend_type;
+        return false;
+    }
+
     if (!lio_->Init(yaml_path)) {
         LOG(ERROR) << "failed to init lio module";
         return false;
     }
 
-    auto yaml = YAML::LoadFile(yaml_path);
     options_.with_loop_closing_ = yaml["system"]["with_loop_closing"].as<bool>();
     options_.with_visualization_ = yaml["system"]["with_ui"].as<bool>();
     options_.with_2dvisualization_ = yaml["system"]["with_2dui"].as<bool>();
@@ -329,6 +347,13 @@ void SlamSystem::PrintExtrinsic() {
     LOG(INFO) << "LiDAR-IMU Rotation (matrix): ";
     LOG(INFO) << R;
     LOG(INFO) << "==================================================";
+}
+
+std::vector<Keyframe::Ptr> SlamSystem::GetAllKeyframes() {
+    if (lio_) {
+        return lio_->GetAllKeyframes();
+    }
+    return std::vector<Keyframe::Ptr>();
 }
 
 }  // namespace lightning
