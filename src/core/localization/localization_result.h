@@ -3,7 +3,9 @@
 //
 #pragma once
 
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 #include "common/eigen_types.h"
 #include "common/nav_state.h"
 
@@ -52,7 +54,10 @@ struct LocalizationResult {
     double dr_delta_t_ = 0;          // 相对于上一帧DR消息的时延
     double is_parking_ = false;
 
-    geometry_msgs::msg::TransformStamped ToGeoMsg() const;  // 转到geometry msg
+    geometry_msgs::msg::TransformStamped ToMapOdomMsg() const;
+    geometry_msgs::msg::TransformStamped ToOdomBaseMsg() const;
+    nav_msgs::msg::Odometry ToOdomMsg() const;
+    geometry_msgs::msg::PoseStamped ToPoseMsg() const;
     NavState ToNavState() const;                            // 转到navstate
 };
 

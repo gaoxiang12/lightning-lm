@@ -26,7 +26,6 @@ void PangolinWindow::Quit() {
         impl_->exit_flag_.store(true);
         impl_->render_thread_.join();
     }
-    impl_->DeInit();
 }
 
 void PangolinWindow::UpdatePointCloudGlobal(const std::map<int, CloudPtr>& cloud) {

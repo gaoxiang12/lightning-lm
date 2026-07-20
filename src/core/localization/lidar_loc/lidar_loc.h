@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <pcl/registration/icp.h>
 #include <chrono>
 #include <deque>
@@ -200,7 +201,7 @@ class LidarLoc {
     std::mutex initial_pose_mutex_;  // 初始定位锁
     bool initial_pose_set_ = false;  // 定位是否被手动设置
     SE3 initial_pose_;               // 手动设置的初始位姿
-    bool loc_inited_ = false;        // 定位是否初始化成功
+    std::atomic_bool loc_inited_{false};  // 定位是否初始化成功
 
     double current_timestamp_ = 0;  // 本次输入的时间戳
     double last_timestamp_ = 0;     // 上次输入的时间戳

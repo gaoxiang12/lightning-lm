@@ -17,10 +17,15 @@ int main(int argc, char** argv) {
     FLAGS_colorlogtostderr = true;
     FLAGS_stderrthreshold = google::INFO;
 
-    google::ParseCommandLineFlags(&argc, &argv, true);
+    auto args = rclcpp::init_and_remove_ros_arguments(argc, argv);
+    std::vector<char*> gflags_argv;
+    for (auto& arg : args) {
+        gflags_argv.push_back(arg.data());
+    }
+    int gflags_argc = static_cast<int>(gflags_argv.size());
+    char** gflags_argv_data = gflags_argv.data();
+    google::ParseCommandLineFlags(&gflags_argc, &gflags_argv_data, true);
     using namespace lightning;
-
-    rclcpp::init(argc, argv);
 
     LocSystem::Options opt;
     LocSystem loc(opt);
@@ -29,8 +34,6 @@ int main(int argc, char** argv) {
         LOG(ERROR) << "failed to init loc";
     }
 
-    /// 默认起点开始定位
-    loc.SetInitPose(SE3());
     loc.Spin();
 
     rclcpp::shutdown();

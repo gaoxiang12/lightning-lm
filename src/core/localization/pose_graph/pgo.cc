@@ -237,26 +237,28 @@ bool PGO::ProcessLidarLoc(const LocalizationResult& loc_result) {
     }
 
     if (!loc_result.lidar_loc_valid_) {
+        impl_->result_.status_ = loc_result.status_;
+        PubResult();
         return false;
     }
 
     // 不允许时间回退
-    static double last_lidar_loc_timestamp = -1;
-    double lidar_loc_delta_t = loc_result.timestamp_ - last_lidar_loc_timestamp;
-    if (last_lidar_loc_timestamp > 0) {
+    double lidar_loc_delta_t = loc_result.timestamp_ - last_lidar_loc_input_time_;
+    if (last_lidar_loc_input_time_ > 0) {
         if (lidar_loc_delta_t < 0) {
             LOG(ERROR) << "lidar loc 时间回退: " << lidar_loc_delta_t;
             return false;
         } else {
-            last_lidar_loc_timestamp = loc_result.timestamp_;
+            last_lidar_loc_input_time_ = loc_result.timestamp_;
         }
     } else {
-        last_lidar_loc_timestamp = loc_result.timestamp_;
+        last_lidar_loc_input_time_ = loc_result.timestamp_;
     }
 
     // 增加一个PGO Frame并触发一次PGO
     auto new_frame = std::make_shared<PGOFrame>();
     new_frame->timestamp_ = loc_result.timestamp_;
+    new_frame->status_ = loc_result.status_;
     new_frame->opti_pose_ = loc_result.pose_;
     new_frame->last_opti_pose_ = loc_result.pose_;
     new_frame->lidar_loc_set_ = true;
@@ -315,6 +317,15 @@ std::shared_ptr<PGOFrame> PGO::GetCurrentPGOFrame() const { return impl_->curren
 bool PGO::Reset() {
     UL lock(impl_->data_mutex_);
     smoother_->Reset();
+    pose_extrapolator_ = std::make_unique<PoseExtrapolator>();
+    high_freq_result_ = LocalizationResult();
+    parking_result_ = LocalizationResult();
+    localization_unusual_tag_ = false;
+    imu_interruption_tag_ = false;
+    localization_unusual_count_ = 0;
+    last_lidar_loc_time_ = 0.;
+    last_lidar_loc_input_time_ = -1.;
+    is_parking_ = false;
     return impl_->Reset();
 }
 
@@ -463,6 +474,20 @@ bool PGO::ExtrapolateLocResult(LocalizationResult& output_result) {
             output_result.pose_ = interp_pose_final;
             output_result.timestamp_ = latest_time;
         }
+    }
+
+    const NavState* relative_state = nullptr;
+    if (!lo_pose_queue.empty() &&
+        std::abs(lo_pose_queue.back().timestamp_ - output_result.timestamp_) < 1e-6) {
+        relative_state = &lo_pose_queue.back();
+    } else if (!dr_pose_queue.empty() &&
+               std::abs(dr_pose_queue.back().timestamp_ - output_result.timestamp_) < 1e-6) {
+        relative_state = &dr_pose_queue.back();
+    }
+    if (relative_state != nullptr) {
+        output_result.rel_pose_ = relative_state->GetPose();
+        output_result.rel_pose_set_ = true;
+        output_result.vel_b_ = relative_state->GetRot().inverse() * relative_state->GetVel();
     }
 
     return true;

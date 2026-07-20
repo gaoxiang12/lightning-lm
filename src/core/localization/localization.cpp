@@ -95,8 +95,8 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
 
         loc_result_ = res;
 
-        if (tf_callback_ && loc_result_.valid_) {
-            tf_callback_(loc_result_.ToGeoMsg());
+        if (result_callback_ && loc_result_.valid_ && loc_result_.rel_pose_set_) {
+            result_callback_(loc_result_);
         }
 
         if (ui_) {
@@ -107,11 +107,15 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
 
     /// 预处理器
     preprocess_.reset(new PointCloudPreprocess());
-    preprocess_->Blind() = yaml.GetValue<double>("fasterlio", "blind");
+    auto config = YAML::LoadFile(yaml_path);
+    auto get_lio_param = [&](const std::string& key) {
+        return config["lio_common"][key] ? config["lio_common"][key] : config["fasterlio"][key];
+    };
+    preprocess_->Blind() = get_lio_param("blind").as<double>();
     preprocess_->TimeScale() = yaml.GetValue<double>("fasterlio", "time_scale");
-    int lidar_type = yaml.GetValue<int>("fasterlio", "lidar_type");
-    preprocess_->NumScans() = yaml.GetValue<int>("fasterlio", "scan_line");
-    preprocess_->PointFilterNum() = yaml.GetValue<int>("fasterlio", "point_filter_num");
+    int lidar_type = get_lio_param("lidar_type").as<int>();
+    preprocess_->NumScans() = get_lio_param("scan_line").as<int>();
+    preprocess_->PointFilterNum() = get_lio_param("point_filter_num").as<int>();
     float height_max = yaml.GetValue<float>("roi", "height_max");
     float height_min = yaml.GetValue<float>("roi", "height_min");
 
@@ -232,6 +236,16 @@ void Localization::LidarOdomProcCloud(CloudPtr cloud) {
 }
 
 void Localization::LidarLocProcCloud(CloudPtr scan_undist) {
+    std::optional<SE3> initial_pose;
+    {
+        UL lock(initial_pose_mutex_);
+        initial_pose.swap(pending_initial_pose_);
+    }
+    if (initial_pose) {
+        pgo_->Reset();
+        lidar_loc_->SetInitialPose(*initial_pose);
+    }
+
     lidar_loc_->ProcessCloud(scan_undist);
 
     auto res = lidar_loc_->GetLocalizationResult();
@@ -339,13 +353,10 @@ void Localization::Finish() {
 }
 
 void Localization::SetExternalPose(const Eigen::Quaterniond& q, const Eigen::Vector3d& t) {
-    UL lock(global_mutex_);
-    /// 设置外部重定位的pose
-    if (lidar_loc_) {
-        lidar_loc_->SetInitialPose(SE3(q, t));
-    }
+    UL lock(initial_pose_mutex_);
+    pending_initial_pose_ = SE3(q, t);
 }
 
-void Localization::SetTFCallback(Localization::TFCallback&& callback) { tf_callback_ = callback; }
+void Localization::SetResultCallback(Localization::ResultCallback&& callback) { result_callback_ = callback; }
 
 }  // namespace lightning::loc

@@ -11,18 +11,23 @@
 #include "wrapper/ros_utils.h"
 
 DEFINE_string(config, "./config/default.yaml", "配置文件");
+DEFINE_string(output_map, "./data/new_map", "退出时保存地图的目录");
 
 /// 运行一个LIO前端，带可视化
 int main(int argc, char** argv) {
     google::InitGoogleLogging(argv[0]);
     FLAGS_colorlogtostderr = true;
     FLAGS_stderrthreshold = google::INFO;
-    google::ParseCommandLineFlags(&argc, &argv, true);
+    auto args = rclcpp::init_and_remove_ros_arguments(argc, argv);
+    std::vector<char*> gflags_argv;
+    for (auto& arg : args) {
+        gflags_argv.push_back(arg.data());
+    }
+    int gflags_argc = static_cast<int>(gflags_argv.size());
+    char** gflags_argv_data = gflags_argv.data();
+    google::ParseCommandLineFlags(&gflags_argc, &gflags_argv_data, true);
 
     using namespace lightning;
-
-    /// 需要rclcpp::init
-    rclcpp::init(argc, argv);
 
     SlamSystem::Options options;
     options.online_mode_ = true;
@@ -35,6 +40,8 @@ int main(int argc, char** argv) {
 
     slam.StartSLAM("new_map");
     slam.Spin();
+
+    slam.SaveMap(FLAGS_output_map);
 
     slam.PrintExtrinsic();
     Timer::PrintAll();

@@ -30,6 +30,7 @@ struct PGOFrame {
     PGOFrame() = default;
     double timestamp_ = 0;
     FrameId frame_id_ = 0;
+    LocalizationStatus status_ = LocalizationStatus::IDLE;
 
     // 优化后的位姿
     SE3 opti_pose_;       // 最新的优化位姿

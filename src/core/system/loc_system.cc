@@ -7,6 +7,8 @@
 #include "io/yaml_io.h"
 #include "wrapper/ros_utils.h"
 
+#include <cmath>
+
 namespace lightning {
 
 LocSystem::LocSystem(LocSystem::Options options) : options_(options) {
@@ -14,7 +16,11 @@ LocSystem::LocSystem(LocSystem::Options options) : options_(options) {
     signal(SIGINT, lightning::debug::SigHandle);
 }
 
-LocSystem::~LocSystem() { loc_->Finish(); }
+LocSystem::~LocSystem() {
+    if (loc_) {
+        loc_->Finish();
+    }
+}
 
 bool LocSystem::Init(const std::string &yaml_path) {
     loc::Localization::Options opt;
@@ -57,14 +63,48 @@ bool LocSystem::Init(const std::string &yaml_path) {
             Timer::Evaluate([&]() { ProcessLidar(cloud); }, "Proc Lidar", true);
         });
 
+    odom_pub_ = node_->create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
+    localization_pose_pub_ =
+        node_->create_publisher<geometry_msgs::msg::PoseStamped>("/lightning/localization_pose", 10);
+    localization_status_pub_ =
+        node_->create_publisher<std_msgs::msg::UInt8>("/lightning/localization_status", 10);
+    initial_pose_sub_ = node_->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+        "/initialpose", 10, [this](const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg) {
+            if (!msg->header.frame_id.empty() && msg->header.frame_id != "map") {
+                RCLCPP_WARN(node_->get_logger(), "Ignoring /initialpose in frame '%s'; expected map",
+                            msg->header.frame_id.c_str());
+                return;
+            }
+            const auto& p = msg->pose.pose.position;
+            const auto& q = msg->pose.pose.orientation;
+            const double norm = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+            if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z) || !std::isfinite(norm) ||
+                norm < 1e-6) {
+                RCLCPP_WARN(node_->get_logger(), "Ignoring invalid /initialpose");
+                return;
+            }
+            SetInitPose(SE3(Eigen::Quaterniond(q.w / norm, q.x / norm, q.y / norm, q.z / norm),
+                            Vec3d(p.x, p.y, p.z)));
+        });
+
     if (options_.pub_tf_) {
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(node_);
-        loc_->SetTFCallback(
-            [this](const geometry_msgs::msg::TransformStamped &pose) { tf_broadcaster_->sendTransform(pose); });
     }
+    loc_->SetResultCallback([this](const loc::LocalizationResult& result) {
+        if (tf_broadcaster_) {
+            tf_broadcaster_->sendTransform(result.ToMapOdomMsg());
+            tf_broadcaster_->sendTransform(result.ToOdomBaseMsg());
+        }
+        odom_pub_->publish(result.ToOdomMsg());
+        localization_pose_pub_->publish(result.ToPoseMsg());
+        std_msgs::msg::UInt8 status;
+        status.data = static_cast<uint8_t>(result.status_);
+        localization_status_pub_->publish(status);
+    });
 
     bool ret = loc_->Init(yaml_path, map_path);
     if (ret) {
+        loc_started_ = true;
         LOG(INFO) << "online loc node has been created.";
     }
 
@@ -75,6 +115,9 @@ void LocSystem::SetInitPose(const SE3 &pose) {
     LOG(INFO) << "set init pose: " << pose.translation().transpose() << ", "
               << pose.unit_quaternion().coeffs().transpose();
 
+    std_msgs::msg::UInt8 status;
+    status.data = static_cast<uint8_t>(loc::LocalizationStatus::INITIALIZING);
+    localization_status_pub_->publish(status);
     loc_->SetExternalPose(pose.unit_quaternion(), pose.translation());
     loc_started_ = true;
 }

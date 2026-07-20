@@ -8,6 +8,8 @@
 #include "core/localization/localization_result.h"
 #include "core/system/async_message_process.h"
 
+#include <optional>
+
 /// 预声明
 namespace lightning {
 namespace ui {
@@ -75,12 +77,12 @@ class Localization {
     void LidarOdomProcCloud(CloudPtr);
     void LidarLocProcCloud(CloudPtr);
 
-    using TFCallback = std::function<void(const geometry_msgs::msg::TransformStamped& odom)>;
+    using ResultCallback = std::function<void(const LocalizationResult& result)>;
     using LocStateCallback = std::function<void(const std_msgs::msg::Int32& state)>;
     using PointcloudBodyCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
     using PointcloudWorldCallback = std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>;
 
-    void SetTFCallback(TFCallback&& callback);
+    void SetResultCallback(ResultCallback&& callback);
 
     // void SetPathCallback(std::function<void(const nav_msgs::msg::Path& path)>&& callback);
     // void SetPointcloudWorldCallback(std::function<void(const sensor_msgs::msg::PointCloud2& pointcloud)>&& callback);
@@ -91,6 +93,8 @@ class Localization {
    private:
     /// 模块  ========================================================================================================
     std::mutex global_mutex_;  // 防止处理过程中被重复init
+    std::mutex initial_pose_mutex_;
+    std::optional<SE3> pending_initial_pose_;
     Options options_;
 
     /// 预处理
@@ -117,7 +121,7 @@ class Localization {
     LocalizationResult loc_result_;
 
     /// 框架相关
-    TFCallback tf_callback_;
+    ResultCallback result_callback_;
     LocStateCallback loc_state_callback_;
     PointcloudBodyCallback pointcloud_body_callback_;
     PointcloudWorldCallback pointcloud_world_callback_;

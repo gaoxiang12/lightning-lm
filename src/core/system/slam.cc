@@ -106,8 +106,7 @@ bool SlamSystem::Init(const std::string& yaml_path) {
         cloud_topic_ = yaml["common"]["lidar_topic"].as<std::string>();
         livox_topic_ = yaml["common"]["livox_lidar_topic"].as<std::string>();
 
-        rclcpp::QoS qos(10);
-        // qos.best_effort();
+        rclcpp::SensorDataQoS qos;
 
         imu_sub_ = node_->create_subscription<sensor_msgs::msg::Imu>(
             imu_topic_, qos, [this](sensor_msgs::msg::Imu::SharedPtr msg) {
@@ -162,6 +161,10 @@ void SlamSystem::SaveMap(const SaveMapService::Request::SharedPtr request,
 }
 
 void SlamSystem::SaveMap(const std::string& path) {
+    if (!lio_ || lio_->GetAllKeyframes().empty()) {
+        LOG(WARNING) << "skip map save: no keyframes";
+        return;
+    }
     std::string save_path = path;
     if (save_path.empty()) {
         save_path = "./data/" + map_name_ + "/";

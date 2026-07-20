@@ -48,7 +48,7 @@ fasterlio:
 g2p5:
   esti_floor: false
   lidar_height: 0.0
-  floor_height: -0.35
+  floor_height: -0.01
   min_th_floor: 0.02
   max_th_floor: 1.0
   grid_map_resolution: 0.02

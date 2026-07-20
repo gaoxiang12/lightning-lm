@@ -59,4 +59,9 @@ add_subdirectory(thirdparty/livox_ros_driver)
 
 add_subdirectory(src)
 
+if(BUILD_TESTING)
+    find_package(ament_cmake_gtest REQUIRED)
+    add_subdirectory(test)
+endif()
+
 ament_package()

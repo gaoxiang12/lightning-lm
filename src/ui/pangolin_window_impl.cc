@@ -429,8 +429,7 @@ void PangolinWindowImpl::Render() {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
-    // unset the current context from the main thread
-    pangolin::GetBoundWindow()->RemoveCurrent();
+    DeInit();
     pangolin::DestroyWindow(GetWindowName());
 }
 
@@ -446,6 +445,13 @@ void PangolinWindowImpl::AllocateBuffer() {
     gltext_label_state_ = font.Text("ba: [0.0000, 0.0000, 0.0000]");
 }
 
-void PangolinWindowImpl::ReleaseBuffer() {}
+void PangolinWindowImpl::ReleaseBuffer() {
+    plotter_vel_.reset();
+    plotter_vel_baselink_.reset();
+    plotter_bias_acc_.reset();
+    plotter_confidence_.reset();
+    plotter_err_.reset();
+    plotter_err_eval_.reset();
+}
 
 }  // namespace lightning::ui

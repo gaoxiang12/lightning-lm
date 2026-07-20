@@ -73,6 +73,17 @@ bool PGOImpl::Reset() {
     frames_by_id_.clear();
     current_frame_ = nullptr;
     last_frame_ = nullptr;
+    dr_pose_queue_.clear();
+    lidar_odom_pose_queue_.clear();
+    lidar_loc_pose_queue_.clear();
+    output_pose_queue_.clear();
+    accumulated_frame_id_ = 0;
+    result_ = LocalizationResult();
+    is_in_map_ = false;
+    lidar_odom_valid_ = true;
+    lidar_odom_conflict_with_dr_ = false;
+    lidar_odom_conflict_with_dr_cnt_ = 0;
+    lidar_odom_valid_cnt_ = 0;
     return true;
 }
 
@@ -743,6 +754,7 @@ void PGOImpl::PGOFrameToResult(const PGOFramePtr& frame, LocalizationResult& res
     // 复制PGOFrame中的信息到Result中
     result.timestamp_ = frame->timestamp_;
     result.pose_ = frame->opti_pose_;
+    result.status_ = frame->status_;
 
     result.lidar_loc_valid_ = frame->lidar_loc_valid_;
     result.lidar_loc_inlier_ = frame->lidar_loc_inlier_;
