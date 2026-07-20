@@ -75,6 +75,18 @@ TEST(LidarLocInitialization, EnforcesConvergenceConfidenceFiniteAndDistanceGates
         true, candidate, inside, std::numeric_limits<double>::infinity(), 1.8, 5.0));
 }
 
+TEST(LidarLocMatcher, RejectsNonConvergedAndNonFiniteNdtOutput) {
+    const Eigen::Matrix4f valid = Eigen::Matrix4f::Identity();
+    Eigen::Matrix4f invalid = valid;
+    invalid(0, 3) = std::numeric_limits<float>::quiet_NaN();
+
+    EXPECT_TRUE(lightning::loc::IsNdtResultValid(true, valid, 2.0));
+    EXPECT_FALSE(lightning::loc::IsNdtResultValid(false, valid, 2.0));
+    EXPECT_FALSE(lightning::loc::IsNdtResultValid(true, invalid, 2.0));
+    EXPECT_FALSE(lightning::loc::IsNdtResultValid(
+        true, valid, std::numeric_limits<double>::infinity()));
+}
+
 TEST(LocalizationResult, ProducesMapOdomBaseChain) {
     lightning::loc::LocalizationResult result;
     result.timestamp_ = 12.5;

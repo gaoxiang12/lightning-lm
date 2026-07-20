@@ -23,6 +23,7 @@ namespace lightning::loc {
 
 bool IsInitializationResultValid(bool matcher_converged, const SE3& candidate_pose, const SE3& result_pose,
                                  double confidence, double min_confidence, double max_distance);
+bool IsNdtResultValid(bool converged, const Eigen::Matrix4f& transform, double confidence);
 
 /// 激光定位对外接口类
 class LidarLoc {

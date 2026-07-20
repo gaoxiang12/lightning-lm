@@ -1,6 +1,6 @@
 #include <algorithm>
 #include <cmath>
-#include <execution>
+#include <limits>
 
 #include <pcl/common/transforms.h>
 #include <pcl/filters/passthrough.h>
@@ -36,6 +36,10 @@ bool IsInitializationResultValid(bool matcher_converged, const SE3& candidate_po
     const Eigen::Vector2d delta_xy =
         (result_pose.translation() - candidate_pose.translation()).head<2>();
     return confidence >= min_confidence && delta_xy.norm() <= max_distance;
+}
+
+bool IsNdtResultValid(bool converged, const Eigen::Matrix4f& transform, double confidence) {
+    return converged && transform.allFinite() && std::isfinite(confidence);
 }
 
 LidarLoc::LidarLoc(LidarLoc::Options options) : options_(options) {
@@ -240,77 +244,64 @@ bool LidarLoc::ProcessLO(const NavState& state) {
 }
 
 bool LidarLoc::YawSearch(SE3& pose, double& confidence, CloudPtr input, CloudPtr output) {
-    SE3 init_pose = pose;
-    auto RPYXYZ = math::SE3ToRollPitchYaw(init_pose);
-    double init_yaw = RPYXYZ.yaw;
+    const SE3 init_pose = pose;
+    auto rpyxyz = math::SE3ToRollPitchYaw(init_pose);
+    const double init_yaw = rpyxyz.yaw;
+    const int step = lidar_loc::grid_search_angle_step;
+    const double radius = lidar_loc::grid_search_angle_range * constant::kDEG2RAD;
+    if (step <= 0 || !std::isfinite(radius)) {
+        LOG(ERROR) << "invalid yaw search configuration: step=" << step << ", radius=" << radius;
+        return false;
+    }
 
-    confidence = 0;
-    bool yaw_search_success = false;
-
-    int step = lidar_loc::grid_search_angle_step;
-    double radius = lidar_loc::grid_search_angle_range * constant::kDEG2RAD;
-    double angle_search_step = 2 * radius / step;
-
-    std::vector<double> searched_yaw;
-    std::vector<double> scores(step);
-    std::vector<int> index;
-    std::vector<SE3> pose_opti(step);
+    const double angle_search_step = 2.0 * radius / step;
+    double best_score = -std::numeric_limits<double>::infinity();
+    SE3 best_pose = init_pose;
+    bool found_rough_candidate = false;
 
     for (int i = 0; i < step; ++i) {
-        double search_yaw = init_yaw + i * angle_search_step - radius;
-        searched_yaw.emplace_back(search_yaw);
-        index.emplace_back(i);
+        rpyxyz.yaw = init_yaw + i * angle_search_step - radius;
+        SE3 candidate = math::XYZRPYToSE3(rpyxyz);
+        double candidate_score = -std::numeric_limits<double>::infinity();
+        if (!Localize(candidate, candidate_score, input, output, true)) {
+            continue;
+        }
+        if (!found_rough_candidate || candidate_score > best_score) {
+            found_rough_candidate = true;
+            best_score = candidate_score;
+            best_pose = candidate;
+        }
     }
 
-    LOG(INFO) << "init yaw: " << init_yaw << ", p: " << RPYXYZ.pitch << ", ro: " << RPYXYZ.roll << ", search from "
-              << searched_yaw.front() << " to " << searched_yaw.back();
-
-    /// 粗分辨率
-    std::for_each(index.begin(), index.end(), [&](int i) {
-        double fitness_score = 0;
-        RPYXYZ.yaw = searched_yaw[i];
-        SE3 pose_esti = math::XYZRPYToSE3(RPYXYZ);
-
-        Localize(pose_esti, fitness_score, input, output, true);
-
-        scores[i] = fitness_score;
-        pose_opti[i] = pose_esti;
-    });
-
-    // find best match
-    auto best_score_idx = std::max_element(scores.begin(), scores.end()) - scores.begin();
-    confidence = scores.at(best_score_idx);
-    pose = pose_opti.at(best_score_idx);
-
-    /// 高分辨率
-    if (confidence > options_.min_init_confidence_) {
-        Localize(pose, confidence, input, output, false);
+    if (!found_rough_candidate) {
+        confidence = best_score;
+        LOG(WARNING) << "yaw search found no converged rough NDT candidate";
+        return false;
     }
 
-    if (confidence > options_.min_init_confidence_) {
-        LOG(INFO) << "init success, score: " << confidence << ", th=" << options_.min_init_confidence_;
-        Eigen::Vector3d suc_translation = pose.translation();
-        Eigen::Matrix3d suc_rotation_matrix = pose.rotationMatrix();
-        double suc_x = suc_translation.x();
-        double suc_y = suc_translation.y();
-        double suc_yaw = atan2(suc_rotation_matrix(1, 0), suc_rotation_matrix(0, 0));
-        LOG(INFO) << "localization init success, pose: " << suc_x << ", " << suc_y << ", " << suc_yaw
-                  << ", conf: " << confidence;
-        yaw_search_success = true;
+    pose = best_pose;
+    confidence = best_score;
+    if (!Localize(pose, confidence, input, output, false)) {
+        LOG(WARNING) << "fine NDT failed after yaw search";
+        return false;
     }
 
-    return yaw_search_success;
+    LOG(INFO) << "yaw search fine result, score=" << confidence
+              << ", pose=" << pose.translation().transpose();
+    return true;
 }
 
 bool LidarLoc::InitWithFP(CloudPtr input, const SE3& fp_pose) {
     assert(input != nullptr && !input->empty());
 
     // 使用功能点的位置进行定位初始化
-    double fitness_score;
+    double fitness_score = -std::numeric_limits<double>::infinity();
     SE3 pose_esti = fp_pose;
     CloudPtr output_cloud(new PointCloudType);
-    // loc_inited_ = YawSearch(pose_esti, fitness_score, input, output_cloud);
-    loc_inited_ = Localize(pose_esti, fitness_score, input, output_cloud);
+    const bool matcher_converged = YawSearch(pose_esti, fitness_score, input, output_cloud);
+    loc_inited_ = IsInitializationResultValid(
+        matcher_converged, fp_pose, pose_esti, fitness_score,
+        options_.min_init_confidence_, options_.max_init_distance_);
 
     if (loc_inited_) {
         current_timestamp_ = math::ToSec(input->header.stamp);
@@ -342,7 +333,13 @@ bool LidarLoc::InitWithFP(CloudPtr input, const SE3& fp_pose) {
         fp_init_fail_pose_vec_.clear();
     } else {
         // 添加失败历史记录
-        LOG(INFO) << "init failed, score: " << fitness_score;
+        const double distance_xy =
+            (pose_esti.translation() - fp_pose.translation()).head<2>().norm();
+        LOG(WARNING) << "init rejected: converged=" << matcher_converged
+                     << ", score=" << fitness_score
+                     << ", min_score=" << options_.min_init_confidence_
+                     << ", distance_xy=" << distance_xy
+                     << ", max_distance=" << options_.max_init_distance_;
         fp_init_fail_pose_vec_.emplace_back(fp_pose);
         fp_last_tried_time_ = 1e-6 * static_cast<double>(input->header.stamp);
     }
@@ -860,11 +857,11 @@ bool LidarLoc::Localize(SE3& pose, double& confidence, CloudPtr input, CloudPtr 
     ndt->align(*output, guess_pose);
     trans = ndt->getFinalTransformation();
     confidence = ndt->getTransformationProbability();
-
-    if (loc_inited_ == false && confidence > options_.min_init_confidence_) {
-        loc_success = true;
-    } else {
-        loc_success = true;
+    loc_success = IsNdtResultValid(ndt->hasConverged(), trans, confidence);
+    if (!loc_success) {
+        LOG(WARNING) << "NDT failed: converged=" << ndt->hasConverged()
+                     << ", confidence=" << confidence;
+        return false;
     }
 
     if (options_.enable_icp_adjust_ && loc_inited_) {
