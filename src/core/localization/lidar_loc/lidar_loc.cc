@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <execution>
 
 #include <pcl/common/transforms.h>
@@ -21,6 +22,21 @@
 #include "utils/timer.h"
 
 namespace lightning::loc {
+
+bool IsInitializationResultValid(bool matcher_converged, const SE3& candidate_pose, const SE3& result_pose,
+                                 double confidence, double min_confidence, double max_distance) {
+    if (!matcher_converged || !std::isfinite(confidence) || !std::isfinite(min_confidence) ||
+        !std::isfinite(max_distance) || max_distance < 0.0) {
+        return false;
+    }
+    if (!candidate_pose.translation().allFinite() || !candidate_pose.unit_quaternion().coeffs().allFinite() ||
+        !result_pose.translation().allFinite() || !result_pose.unit_quaternion().coeffs().allFinite()) {
+        return false;
+    }
+    const Eigen::Vector2d delta_xy =
+        (result_pose.translation() - candidate_pose.translation()).head<2>();
+    return confidence >= min_confidence && delta_xy.norm() <= max_distance;
+}
 
 LidarLoc::LidarLoc(LidarLoc::Options options) : options_(options) {
     pcl_ndt_.reset(new NDTType());

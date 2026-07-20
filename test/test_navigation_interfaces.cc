@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
 
+#include <limits>
+
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 
 #include "core/frontend/pointcloud_preprocess.h"
+#include "core/localization/lidar_loc/lidar_loc.h"
 #include "core/localization/localization_result.h"
 #include "core/localization/pose_graph/pgo.h"
 
@@ -48,6 +51,28 @@ TEST(PointCloudPreprocess, ReadsFusedMid360Layout) {
     EXPECT_FLOAT_EQ(output->at(1).x, 2.0F);
     EXPECT_FLOAT_EQ(output->at(1).intensity, 21.0F);
     EXPECT_NEAR(output->at(1).time, 1.0, 1e-6);
+}
+
+TEST(LidarLocInitialization, EnforcesConvergenceConfidenceFiniteAndDistanceGates) {
+    const lightning::SE3 candidate(lightning::SO3(), lightning::Vec3d(0.0, 0.0, 0.0));
+    const lightning::SE3 inside(lightning::SO3(), lightning::Vec3d(3.0, 4.0, 0.0));
+    const lightning::SE3 outside(lightning::SO3(), lightning::Vec3d(3.01, 4.0, 0.0));
+    const lightning::SE3 nonfinite(
+        lightning::SO3(),
+        lightning::Vec3d(std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0));
+
+    EXPECT_TRUE(lightning::loc::IsInitializationResultValid(
+        true, candidate, inside, 1.8, 1.8, 5.0));
+    EXPECT_FALSE(lightning::loc::IsInitializationResultValid(
+        false, candidate, inside, 2.0, 1.8, 5.0));
+    EXPECT_FALSE(lightning::loc::IsInitializationResultValid(
+        true, candidate, inside, 1.79, 1.8, 5.0));
+    EXPECT_FALSE(lightning::loc::IsInitializationResultValid(
+        true, candidate, outside, 2.0, 1.8, 5.0));
+    EXPECT_FALSE(lightning::loc::IsInitializationResultValid(
+        true, candidate, nonfinite, 2.0, 1.8, 5.0));
+    EXPECT_FALSE(lightning::loc::IsInitializationResultValid(
+        true, candidate, inside, std::numeric_limits<double>::infinity(), 1.8, 5.0));
 }
 
 TEST(LocalizationResult, ProducesMapOdomBaseChain) {

@@ -21,6 +21,9 @@ class PangolinWindow;
 
 namespace lightning::loc {
 
+bool IsInitializationResultValid(bool matcher_converged, const SE3& candidate_pose, const SE3& result_pose,
+                                 double confidence, double min_confidence, double max_distance);
+
 /// 激光定位对外接口类
 class LidarLoc {
    public:
@@ -42,6 +45,7 @@ class LidarLoc {
         bool with_height_ = true;                      // 建图期间是否带有高度约束？
         bool force_2d_ = true;                         // 强制在2D空间
         float min_init_confidence_ = 0.1;              // 初始化时要求的最小分值
+        float max_init_distance_ = 5.0F;  // 初始化结果距候选功能点的最大 XY 距离，单位 m
         bool init_with_fp_ = true;                     // 是否使用功能点进行初始化
         bool enable_parking_static_ = false;           // 是否在静止时输出固定位置
         bool enable_icp_adjust_ = false;               // 是否使用icp调整ndt匹配结果提高定位精度
