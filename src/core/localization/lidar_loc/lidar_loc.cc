@@ -86,6 +86,7 @@ bool LidarLoc::Init(const std::string& config_path) {
     options_.update_kf_dis_ = yaml.GetValue<double>("lidar_loc", "update_kf_dis");
     options_.update_lidar_loc_score_ = yaml.GetValue<double>("lidar_loc", "update_lidar_loc_score");
     options_.min_init_confidence_ = yaml.GetValue<float>("lidar_loc", "min_init_confidence");
+    options_.max_init_distance_ = yaml.GetValue<float>("lidar_loc", "max_init_distance");
 
     // options_.filter_z_min_ = yaml.GetValue<double>("lidar_loc", "filter_z_min");
     // options_.filter_z_max_ = yaml.GetValue<double>("lidar_loc", "filter_z_max");
@@ -102,7 +103,8 @@ bool LidarLoc::Init(const std::string& config_path) {
     lidar_loc::grid_search_angle_step = yaml.GetValue<double>("lidar_loc", "grid_search_angle_step");
     lidar_loc::grid_search_angle_range = yaml.GetValue<double>("lidar_loc", "grid_search_angle_range");
 
-    LOG(INFO) << "min init confidence: " << options_.min_init_confidence_;
+    LOG(INFO) << "init acceptance: min confidence=" << options_.min_init_confidence_
+              << ", max XY distance=" << options_.max_init_distance_ << " m";
 
     std::string map_policy = yaml.GetValue<std::string>("maps", "dyn_cloud_policy");
     if (map_policy == "short") {
@@ -496,6 +498,8 @@ void LidarLoc::Align(const CloudPtr& input) {
 
         if (initial_pose_set_) {
             /// 尝试在给定点初始化
+            map_->LoadOnPose(initial_pose_);
+            UpdateGlobalMap();
             if (InitWithFP(input, initial_pose_)) {
                 LOG(INFO) << "init with external pose: " << initial_pose_.translation().transpose();
                 initial_pose_set_ = false;
@@ -522,9 +526,13 @@ void LidarLoc::Align(const CloudPtr& input) {
             }
 
             auto all_fps = map_->GetAllFP();
+            std::stable_sort(all_fps.begin(), all_fps.end(), [](const auto& lhs, const auto& rhs) {
+                return lhs.name_ == "start" && rhs.name_ != "start";
+            });
             bool fp_init_success = false;
             for (const auto& fp : all_fps) {
                 map_->LoadOnPose(fp.pose_);
+                UpdateGlobalMap();
                 if (InitWithFP(input, fp.pose_)) {
                     LOG(INFO) << "init with fp: " << fp.name_;
                     fp_init_success = true;

@@ -92,6 +92,7 @@ lidar_loc:
   lidar_loc_odom_th: 0.5
   init_with_fp: true
   min_init_confidence: 1.8
+  max_init_distance: 5.0
   update_dynamic_polygon: true
   update_err_h: 0.2
   update_err_v: 0.2
