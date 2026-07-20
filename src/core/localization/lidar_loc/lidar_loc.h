@@ -5,8 +5,10 @@
 #include <chrono>
 #include <deque>
 #include <iostream>
+#include <mutex>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <thread>
+#include <utility>
 
 #include "common/nav_state.h"
 #include "common/timed_pose.h"
@@ -24,6 +26,8 @@ namespace lightning::loc {
 bool IsInitializationResultValid(bool matcher_converged, const SE3& candidate_pose, const SE3& result_pose,
                                  double confidence, double min_confidence, double max_distance);
 bool IsNdtResultValid(bool converged, const Eigen::Matrix4f& transform, double confidence);
+void SetTrackingResultState(LocalizationResult& result, bool matcher_succeeded, double confidence,
+                            int consecutive_failures);
 
 /// 激光定位对外接口类
 class LidarLoc {
@@ -142,6 +146,14 @@ class LidarLoc {
 
    private:
     // 内部函数  ==========================================================================
+    template <typename Callback>
+    decltype(auto) WithCandidateTargetLock(Callback&& callback) {
+        std::lock_guard<std::mutex> lock(candidate_target_mutex_);
+        return std::forward<Callback>(callback)();
+    }
+
+    friend class LidarLocTargetSerialization_BackgroundCannotReplaceTargetBetweenRoughAndFine_Test;
+
     /**
      * 对点云进行配准
      * @param input
@@ -190,7 +202,8 @@ class LidarLoc {
     // 成员变量  ==========================================================================
     Options options_;
 
-    std::mutex match_mutex_;  // 锁定pcl_ndt指针
+    std::mutex candidate_target_mutex_;  // 串行化候选地图构建、粗匹配和精匹配
+    std::mutex match_mutex_;             // 锁定pcl_ndt指针
 
     using NDTType = pclomp::NormalDistributionsTransform<PointType, PointType>;
     NDTType::Ptr pcl_ndt_ = nullptr;

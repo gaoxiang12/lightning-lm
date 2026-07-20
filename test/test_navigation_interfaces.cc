@@ -1,6 +1,12 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <fstream>
+#include <future>
 #include <limits>
+#include <vector>
 
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
@@ -9,6 +15,7 @@
 #include "core/localization/lidar_loc/lidar_loc.h"
 #include "core/localization/localization_result.h"
 #include "core/localization/pose_graph/pgo.h"
+#include "io/yaml_io.h"
 
 namespace {
 
@@ -87,6 +94,70 @@ TEST(LidarLocMatcher, RejectsNonConvergedAndNonFiniteNdtOutput) {
         true, valid, std::numeric_limits<double>::infinity()));
 }
 
+TEST(LidarLocTracking, FailedMatcherIsNotAValidFiniteMeasurement) {
+    lightning::loc::LocalizationResult result;
+
+    lightning::loc::SetTrackingResultState(
+        result, false, std::numeric_limits<double>::infinity(), 1);
+
+    EXPECT_FALSE(result.lidar_loc_valid_);
+    EXPECT_TRUE(std::isfinite(result.confidence_));
+    EXPECT_DOUBLE_EQ(result.confidence_, 0.0);
+    EXPECT_EQ(result.status_, lightning::loc::LocalizationStatus::GOOD);
+}
+
+TEST(YamlIo, UsesDefaultOnlyWhenValueIsMissing) {
+    const std::string path = "/tmp/lightning_yaml_optional_value_test.yaml";
+    {
+        std::ofstream out(path);
+        out << "lidar_loc:\n  configured_distance: 3.5\n";
+    }
+    const lightning::YAML_IO yaml(path);
+
+    EXPECT_FLOAT_EQ(yaml.GetValueOr<float>("lidar_loc", "max_init_distance", 5.0F), 5.0F);
+    EXPECT_FLOAT_EQ(yaml.GetValueOr<float>("lidar_loc", "configured_distance", 5.0F), 3.5F);
+
+    std::remove(path.c_str());
+}
+
+}  // namespace
+
+namespace lightning::loc {
+
+TEST(LidarLocTargetSerialization, BackgroundCannotReplaceTargetBetweenRoughAndFine) {
+    LidarLoc loc;
+    std::vector<int> events;
+    std::promise<void> rough_started;
+    std::promise<void> allow_fine;
+    auto allow_fine_future = allow_fine.get_future();
+    auto candidate = std::async(std::launch::async, [&] {
+        loc.WithCandidateTargetLock([&] {
+            events.push_back(1);
+            rough_started.set_value();
+            allow_fine_future.wait();
+            events.push_back(2);
+        });
+    });
+    rough_started.get_future().wait();
+
+    std::promise<void> background_attempted;
+    auto background = std::async(std::launch::async, [&] {
+        background_attempted.set_value();
+        loc.WithCandidateTargetLock([&] { events.push_back(3); });
+    });
+    background_attempted.get_future().wait();
+
+    EXPECT_EQ(background.wait_for(std::chrono::milliseconds(100)), std::future_status::timeout);
+    allow_fine.set_value();
+    candidate.get();
+    background.get();
+    EXPECT_EQ(events, (std::vector<int>{1, 2, 3}));
+}
+
+}  // namespace lightning::loc
+
+namespace {
+
 TEST(LocalizationResult, ProducesMapOdomBaseChain) {
     lightning::loc::LocalizationResult result;
     result.timestamp_ = 12.5;
@@ -149,6 +220,45 @@ TEST(PGO, PreservesLocalizationStatus) {
     failed.status_ = lightning::loc::LocalizationStatus::FAIL;
     EXPECT_FALSE(pgo.ProcessLidarLoc(failed));
     EXPECT_EQ(output.status_, lightning::loc::LocalizationStatus::FAIL);
+}
+
+TEST(PGO, RejectsNonFiniteLocalizationConfidence) {
+    lightning::loc::PGO pgo;
+    lightning::loc::LocalizationResult output;
+    int publish_count = 0;
+    pgo.SetHighFrequencyGlobalOutputHandleFunction(
+        [&](const lightning::loc::LocalizationResult& result) {
+            output = result;
+            ++publish_count;
+        });
+    lightning::NavState odom;
+    odom.timestamp_ = 0.9;
+    odom.SetPose(lightning::SE3());
+    pgo.ProcessLidarOdom(odom);
+    pgo.ProcessDR(odom);
+    odom.timestamp_ = 1.0;
+    pgo.ProcessLidarOdom(odom);
+    pgo.ProcessDR(odom);
+
+    lightning::loc::LocalizationResult loc;
+    loc.timestamp_ = 1.0;
+    loc.lidar_loc_valid_ = true;
+    loc.confidence_ = 1.0;
+    loc.status_ = lightning::loc::LocalizationStatus::GOOD;
+    ASSERT_TRUE(pgo.ProcessLidarLoc(loc));
+    ASSERT_TRUE(output.lidar_loc_valid_);
+
+    loc.timestamp_ = 1.1;
+    loc.confidence_ = std::numeric_limits<double>::infinity();
+    loc.status_ = lightning::loc::LocalizationStatus::FOLLOWING_DR;
+    const int count_before_rejection = publish_count;
+
+    EXPECT_FALSE(pgo.ProcessLidarLoc(loc));
+    EXPECT_GT(publish_count, count_before_rejection);
+    EXPECT_FALSE(output.lidar_loc_valid_);
+    EXPECT_TRUE(std::isfinite(output.confidence_));
+    EXPECT_DOUBLE_EQ(output.confidence_, 0.0);
+    EXPECT_EQ(output.status_, lightning::loc::LocalizationStatus::FOLLOWING_DR);
 }
 
 TEST(PGO, KeepsRelativePoseAtPublishedTimestamp) {

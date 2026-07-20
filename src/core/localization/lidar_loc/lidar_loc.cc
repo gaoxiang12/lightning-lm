@@ -42,6 +42,19 @@ bool IsNdtResultValid(bool converged, const Eigen::Matrix4f& transform, double c
     return converged && transform.allFinite() && std::isfinite(confidence);
 }
 
+void SetTrackingResultState(LocalizationResult& result, bool matcher_succeeded, double confidence,
+                            int consecutive_failures) {
+    result.lidar_loc_valid_ = matcher_succeeded && std::isfinite(confidence);
+    result.confidence_ = result.lidar_loc_valid_ ? confidence : 0.0;
+    if (consecutive_failures < 100) {
+        result.status_ = LocalizationStatus::GOOD;
+    } else if (consecutive_failures < 300) {
+        result.status_ = LocalizationStatus::FOLLOWING_DR;
+    } else {
+        result.status_ = LocalizationStatus::FAIL;
+    }
+}
+
 LidarLoc::LidarLoc(LidarLoc::Options options) : options_(options) {
     pcl_ndt_.reset(new NDTType());
     pcl_ndt_->setResolution(1.0);
@@ -86,7 +99,7 @@ bool LidarLoc::Init(const std::string& config_path) {
     options_.update_kf_dis_ = yaml.GetValue<double>("lidar_loc", "update_kf_dis");
     options_.update_lidar_loc_score_ = yaml.GetValue<double>("lidar_loc", "update_lidar_loc_score");
     options_.min_init_confidence_ = yaml.GetValue<float>("lidar_loc", "min_init_confidence");
-    options_.max_init_distance_ = yaml.GetValue<float>("lidar_loc", "max_init_distance");
+    options_.max_init_distance_ = yaml.GetValueOr<float>("lidar_loc", "max_init_distance", 5.0F);
 
     // options_.filter_z_min_ = yaml.GetValue<double>("lidar_loc", "filter_z_min");
     // options_.filter_z_max_ = yaml.GetValue<double>("lidar_loc", "filter_z_max");
@@ -429,14 +442,16 @@ void LidarLoc::UpdateMapThread() {
     LOG(INFO) << "UpdateMapThread thread is running";
     while (!update_map_quit_) {
         if (map_->MapUpdated() || map_->DynamicMapUpdated()) {
-            UpdateGlobalMap();
+            WithCandidateTargetLock([&] {
+                UpdateGlobalMap();
 
-            if (ui_) {
-                ui_->UpdatePointCloudGlobal(map_->GetStaticCloud());
-                ui_->UpdatePointCloudDynamic(map_->GetDynamicCloud());
-            }
+                if (ui_) {
+                    ui_->UpdatePointCloudGlobal(map_->GetStaticCloud());
+                    ui_->UpdatePointCloudDynamic(map_->GetDynamicCloud());
+                }
 
-            map_->CleanMapUpdate();
+                map_->CleanMapUpdate();
+            });
         }
         usleep(10000);
     }
@@ -498,9 +513,12 @@ void LidarLoc::Align(const CloudPtr& input) {
 
         if (initial_pose_set_) {
             /// 尝试在给定点初始化
-            map_->LoadOnPose(initial_pose_);
-            UpdateGlobalMap();
-            if (InitWithFP(input, initial_pose_)) {
+            const bool initialized = WithCandidateTargetLock([&] {
+                map_->LoadOnPose(initial_pose_);
+                UpdateGlobalMap();
+                return InitWithFP(input, initial_pose_);
+            });
+            if (initialized) {
                 LOG(INFO) << "init with external pose: " << initial_pose_.translation().transpose();
                 initial_pose_set_ = false;
                 return;
@@ -531,9 +549,12 @@ void LidarLoc::Align(const CloudPtr& input) {
             });
             bool fp_init_success = false;
             for (const auto& fp : all_fps) {
-                map_->LoadOnPose(fp.pose_);
-                UpdateGlobalMap();
-                if (InitWithFP(input, fp.pose_)) {
+                const bool initialized = WithCandidateTargetLock([&] {
+                    map_->LoadOnPose(fp.pose_);
+                    UpdateGlobalMap();
+                    return InitWithFP(input, fp.pose_);
+                });
+                if (initialized) {
                     LOG(INFO) << "init with fp: " << fp.name_;
                     fp_init_success = true;
                     break;
@@ -690,7 +711,6 @@ void LidarLoc::Align(const CloudPtr& input) {
     // }
 
     current_abs_pose_ = current_pose_esti;
-    current_score_ = fitness_score;
     double delta_rel_abs_pose = 0;
     bool lidar_loc_odom_valid = true;
 
@@ -701,11 +721,12 @@ void LidarLoc::Align(const CloudPtr& input) {
     }
 
     if (loc_success) {
+        current_score_ = fitness_score;
         lidar_loc_odom_valid = CheckLidarOdomValid(current_pose_esti, delta_rel_abs_pose);
         last_timestamp_ = current_timestamp_;  // 成功时，更新上一时刻激光定位时间
         match_fail_count_ = 0;
     } else {
-        current_score_ = fitness_score;
+        current_score_ = 0.0;
         LOG(WARNING) << "localization failed! score: " << current_score_;
 
         ///  若连续3帧匹配失败就设一个大分值
@@ -732,17 +753,9 @@ void LidarLoc::Align(const CloudPtr& input) {
     {
         UL lock(result_mutex_);
         localization_result_.timestamp_ = current_timestamp_;
-        localization_result_.confidence_ = fitness_score;
-        if (match_fail_count_ < 100) {
-            localization_result_.lidar_loc_valid_ = true;
-            localization_result_.status_ = LocalizationStatus::GOOD;
-        } else if (match_fail_count_ >= 100 && match_fail_count_ < 300) {
-            localization_result_.lidar_loc_valid_ = false;
-            localization_result_.status_ = LocalizationStatus::FOLLOWING_DR;
-        } else {
+        SetTrackingResultState(localization_result_, loc_success, current_score_, match_fail_count_);
+        if (match_fail_count_ >= 300) {
             match_fail_count_ = 300;
-            localization_result_.lidar_loc_valid_ = false;
-            localization_result_.status_ = LocalizationStatus::FAIL;
         }
 
         localization_result_.lidar_loc_odom_delta_ = delta_rel_abs_pose;
@@ -847,18 +860,11 @@ bool LidarLoc::Localize(SE3& pose, double& confidence, CloudPtr input, CloudPtr 
 
     LOG(INFO) << "loc from: " << pose.translation().transpose();
 
-    if (pcl_ndt_->getInputTarget() == nullptr) {
+    UL lock(match_mutex_);
+    NDTType::Ptr ndt = use_rough_res ? pcl_ndt_rough_ : pcl_ndt_;
+    if (ndt == nullptr || ndt->getInputTarget() == nullptr) {
         LOG(INFO) << "lidar loc target is null, skip";
         return false;
-    }
-
-    UL lock(match_mutex_);
-    NDTType::Ptr ndt = nullptr;
-
-    if (use_rough_res) {
-        ndt = pcl_ndt_rough_;
-    } else {
-        ndt = pcl_ndt_;
     }
 
     ndt->setInputSource(input);

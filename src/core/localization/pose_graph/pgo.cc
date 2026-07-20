@@ -1,6 +1,8 @@
 #include "pgo.h"
 #include "pgo_impl.h"
 
+#include <cmath>
+
 #include <boost/format.hpp>
 
 #include <glog/logging.h>
@@ -236,8 +238,10 @@ bool PGO::ProcessLidarLoc(const LocalizationResult& loc_result) {
         return false;
     }
 
-    if (!loc_result.lidar_loc_valid_) {
+    if (!loc_result.lidar_loc_valid_ || !std::isfinite(loc_result.confidence_)) {
         impl_->result_.status_ = loc_result.status_;
+        impl_->result_.lidar_loc_valid_ = false;
+        impl_->result_.confidence_ = 0.0;
         PubResult();
         return false;
     }

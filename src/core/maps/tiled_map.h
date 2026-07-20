@@ -5,6 +5,7 @@
 #ifndef LIGHNING_TILED_MAP_H
 #define LIGHNING_TILED_MAP_H
 
+#include <atomic>
 #include <opencv2/core/core.hpp>
 #include <set>
 #include <map>
@@ -176,12 +177,12 @@ class TiledMap {
 
     int NumActiveChunks() const { return loaded_chunks_.size(); }
 
-    bool MapUpdated() const { return map_updated_; }
-    bool DynamicMapUpdated() const { return dynamic_map_updated_; }
+    bool MapUpdated() const { return map_updated_.load(); }
+    bool DynamicMapUpdated() const { return dynamic_map_updated_.load(); }
 
     void CleanMapUpdate() {
-        map_updated_ = false;
-        dynamic_map_updated_ = false;
+        map_updated_.store(false);
+        dynamic_map_updated_.store(false);
     }
 
     /// 更新静态点云地图
@@ -277,8 +278,8 @@ class TiledMap {
     bool last_load_grid_set_ = false;       // 上次加载的flag
 
     std::set<Vec2i, math::less_vec<2>> loaded_chunks_;  // 已经载入的区块，以网格ID为索引
-    bool map_updated_ = false;
-    bool dynamic_map_updated_ = false;
+    std::atomic_bool map_updated_{false};
+    std::atomic_bool dynamic_map_updated_{false};
 
     std::map<int, DynamicPolygon> dynamic_polygon_;  // 动态区域，从txt中读取
 
