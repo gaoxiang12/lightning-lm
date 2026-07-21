@@ -91,6 +91,11 @@ void PangolinWindow::UpdateKF(std::shared_ptr<Keyframe> kf) {
     impl_->all_keyframes_.emplace_back(kf);
 }
 
+void PangolinWindow::UpdateLoopEdges(const std::vector<std::pair<SE3, SE3>>& edges) {
+    std::lock_guard<std::mutex> lock(impl_->mtx_current_scan_);
+    impl_->loop_edges_ = edges;
+}
+
 void PangolinWindow::SetCurrentScanSize(int current_scan_size) { impl_->max_size_of_current_scan_ = current_scan_size; }
 
 void PangolinWindow::SetTImuLidar(const SE3& T_imu_lidar) { impl_->T_imu_lidar_ = T_imu_lidar; }

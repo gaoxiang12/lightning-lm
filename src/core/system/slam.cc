@@ -57,8 +57,18 @@ bool SlamSystem::Init(const std::string& yaml_path) {
         LOG(INFO) << "slam with loop closing";
         LoopClosing::Options options;
         options.online_mode_ = options_.online_mode_;
+        if (yaml["loop_closing"]["detector"]) {
+            options.detector_type_ = yaml["loop_closing"]["detector"].as<std::string>();
+        }
+        if (yaml["loop_closing"]["pose_estimator"]) {
+            options.pose_estimator_type_ = yaml["loop_closing"]["pose_estimator"].as<std::string>();
+        }
         lc_ = std::make_shared<LoopClosing>(options);
-        lc_->Init(yaml_path);
+        if (!lc_->Init(yaml_path)) {
+            LOG(ERROR) << "failed to init loop closing, disabling";
+            lc_ = nullptr;
+            options_.with_loop_closing_ = false;
+        }
     }
 
     if (options_.with_visualization_) {
@@ -75,25 +85,40 @@ bool SlamSystem::Init(const std::string& yaml_path) {
 
         g2p5_ = std::make_shared<g2p5::G2P5>(opt);
         g2p5_->Init(yaml_path);
+    }
 
-        if (options_.with_loop_closing_) {
-            /// 当发生回环时，触发一次重绘
-            lc_->SetLoopClosedCB([this]() { g2p5_->RedrawGlobalMap(); });
-        }
+    if (options_.with_loop_closing_) {
+        /// 当发生回环时，触发重绘并更新 UI 回环边
+        lc_->SetLoopClosedCB([this]() {
+            if (g2p5_) {
+                g2p5_->RedrawGlobalMap();
+            }
+            if (ui_) {
+                ui_->UpdateLoopEdges(lc_->GetLoopEdges());
+            }
+        });
+    }
 
-        if (options_.with_2dvisualization_) {
-            g2p5_->SetMapUpdateCallback([this](g2p5::G2P5MapPtr map) {
-                cv::Mat image = map->ToCV();
-                cv::imshow("map", image);
+    if (options_.with_gridmap_ && options_.with_2dvisualization_) {
+        bool map_window_alive = true;
+        g2p5_->SetMapUpdateCallback([this, map_window_alive](g2p5::G2P5MapPtr map) mutable {
+            if (!map_window_alive) return;
 
-                if (options_.step_on_kf_) {
-                    cv::waitKey(0);
+            cv::Mat image = map->ToCV();
+            cv::imshow("map", image);
 
-                } else {
-                    cv::waitKey(10);
-                }
-            });
-        }
+            if (options_.step_on_kf_) {
+                cv::waitKey(0);
+            } else {
+                cv::waitKey(10);
+            }
+
+            // 检测窗口是否被用户关闭
+            if (cv::getWindowProperty("map", cv::WND_PROP_AUTOSIZE) < 0) {
+                map_window_alive = false;
+                cv::destroyWindow("map");
+            }
+        });
     }
 
     if (options_.online_mode_) {

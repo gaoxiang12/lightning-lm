@@ -1,0 +1,142 @@
+# NCLT 数据集配置 - 使用 BEVPlace2 回环检测
+# 用法: ros2 run lightning run_slam_offline --config ./src/lightning-lm/config/default_nclt_bevplace2.yaml --input_bag <bag>
+common:
+  dataset: "nclt"
+  lidar_topic: "points_raw"
+  livox_lidar_topic: "/livox/lidar"
+  imu_topic: "imu_raw"
+  debug: false
+
+lio_common:
+  lidar_type: 2
+  scan_line: 32
+  blind: 0.5
+  point_filter_num: 6
+  filter_size_scan: 0.5
+  filter_size_map: 0.5
+  max_iteration: 4
+  acc_cov: 0.1
+  gyr_cov: 0.1
+  b_acc_cov: 0.0001
+  b_gyr_cov: 0.0001
+  extrinsic_T: [0, 0, 0.0]
+  extrinsic_R: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+
+fasterlio:
+  time_scale: 1e-3
+  skip_lidar_num: 0
+  ivox_grid_resolution: 0.5
+  ivox_nearby_type: 18
+  esti_plane_threshold: 0.1
+  use_aa: false
+  extrinsic_est_en: false
+  keep_first_imu_estimation: false
+  kf_dis_th: 2.0
+  kf_angle_th: 5.0
+  enable_icp_part: false
+  plane_icp_weight: 500.0
+  min_pts: 300
+  imu_filter: true
+  proj_kfs: false
+
+g2p5:
+  esti_floor: false
+  lidar_height: 0.0
+  floor_height: -1.2
+  min_th_floor: 0.50
+  max_th_floor: 1.0
+  grid_map_resolution: 0.2
+
+system:
+  mapping_frontend: "aa_fasterlio"
+  with_loop_closing: true
+  with_ui: true
+  with_2dui: true
+  with_g2p5: true
+  step_on_kf: false
+
+  enable_lidar_loc_skip: false
+  enable_lidar_loc_rviz: false
+  enable_lidar_odom_skip: false
+  lidar_loc_skip_num: 4
+  lidar_odom_skip_num: 2
+  map_path: ./data/new_map/
+  pub_tf: true
+
+# ====== BEVPlace2 回环检测配置 ======
+loop_closing:
+  detector: bevplace2           # 使用 BEVPlace2 描述子检索
+  pose_estimator: bevplace2     # 使用 BEVPlace2 特征匹配位姿估计
+  with_height: true
+
+# BEVPlace2 参数
+bevplace2:
+  bev_resolution: 0.4           # BEV 图像分辨率 (m/pixel)
+  bev_range: 40.0               # BEV 覆盖范围 (±m)
+  bev_size: 200                 # BEV 图像尺寸 (pixel)
+  descriptor_match_th: 1.5       # 描述子 L2 欧氏距离阈值（L2 归一化描述子范围 [0,2]）
+  min_id_gap: 50                # 最小关键帧 ID 间隔
+
+lidar_loc:
+  enable_dynamic_polygon: false
+  enable_parking_static: true
+  enable_icp_adjust: false
+  filter_intensity_max: 100.0
+  filter_intensity_min: 10.0
+  filter_z_max: 30.0
+  filter_z_min: -1.0
+  force_2d: false
+  grid_search_angle_range: 180.0
+  grid_search_angle_step: 60
+  lidar_loc_odom_th: 0.5
+  init_with_fp: true
+  min_init_confidence: 1.8
+  update_dynamic_cloud: true
+  update_err_h: 0.2
+  update_err_v: 0.2
+  update_kf_dis: 2.0
+  update_lidar_loc_score: 2.5
+  loc_on_kf: true
+  try_self_extrap: false
+
+maps:
+  delete_when_unload: false
+  dyn_cloud_policy: persistent
+  load_dyn_cloud: true
+  load_map_size: 2
+  max_pts_dyn_chunk: 100000
+  save_dyn_when_quit: true
+  save_dyn_when_unload: false
+  unload_map_size: 4
+  with_dyn_area: false
+
+pgo:
+  dr_ang_noise: 0.5
+  dr_pos_noise: 1.0
+  dr_pos_noise_ratio: 1.0
+  lidar_loc_ang_noise: 1.0
+  lidar_loc_outlier_th: 5.0
+  lidar_loc_pos_noise: 0.3
+  lidar_odom_ang_noise: 1.0
+  lidar_odom_pos_noise: 0.3
+  pgo_frame_converge_ang_th: 1.0
+  pgo_frame_converge_pos_th: 0.05
+  rtk_fix_ang_noise: 2.0
+  rtk_fix_pos_noise: 1.0
+  rtk_height_noise_ratio: 10.0
+  rtk_other_ang_noise: 10.0
+  rtk_other_pos_noise: 5.0
+  rtk_outlier_th: 1.0
+  smooth_factor: 0.01
+
+roi:
+  height_max: 5.0
+  height_min: -2.0
+  range_max: 70
+  range_min: 3.0
+
+ui:
+  car_length: 2.0
+  car_width: 1.6
+  car_height: 1.7
+  scans: 1

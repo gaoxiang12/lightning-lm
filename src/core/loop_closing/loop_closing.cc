@@ -5,10 +5,7 @@
 #include "core/loop_closing/loop_closing.h"
 #include "common/keyframe.h"
 #include "common/loop_candidate.h"
-#include "utils/pointcloud_utils.h"
-
-#include <pcl/common/transforms.h>
-#include <pcl/registration/ndt.h>
+#include "core/loop_closing/loop_closing_factory.h"
 
 #include "core/opti_algo/algo_select.h"
 #include "core/robust_kernel/cauchy.h"
@@ -16,6 +13,8 @@
 #include "core/types/edge_se3_height_prior.h"
 #include "core/types/vertex_se3.h"
 #include "io/yaml_io.h"
+
+#include <yaml-cpp/yaml.h>
 
 namespace lightning {
 
@@ -25,7 +24,7 @@ LoopClosing::~LoopClosing() {
     }
 }
 
-void LoopClosing::Init(const std::string yaml_path) {
+bool LoopClosing::Init(const std::string yaml_path) {
     /// setup miao
     miao::OptimizerConfig config(miao::AlgorithmType::LEVENBERG_MARQUARDT,
                                  miao::LinearSolverType::LINEAR_SOLVER_SPARSE_EIGEN, false);
@@ -43,14 +42,34 @@ void LoopClosing::Init(const std::string yaml_path) {
     info_loops_.block<3, 3>(3, 3) = Mat3d::Identity() * 1.0 / (options_.loop_rot_noise_ * options_.loop_rot_noise_);
 
     if (!yaml_path.empty()) {
-        YAML_IO yaml(yaml_path);
+        auto yaml = YAML::LoadFile(yaml_path);
 
-        options_.loop_kf_gap_ = yaml.GetValue<int>("loop_closing", "loop_kf_gap");
-        options_.min_id_interval_ = yaml.GetValue<int>("loop_closing", "min_id_interval");
-        options_.closest_id_th_ = yaml.GetValue<int>("loop_closing", "closest_id_th");
-        options_.max_range_ = yaml.GetValue<double>("loop_closing", "max_range");
-        options_.ndt_score_th_ = yaml.GetValue<double>("loop_closing", "ndt_score_th");
-        options_.with_height_ = yaml.GetValue<bool>("loop_closing", "with_height");
+        // 读取策略类型
+        if (yaml["loop_closing"]["detector"]) {
+            options_.detector_type_ = yaml["loop_closing"]["detector"].as<std::string>();
+        }
+        if (yaml["loop_closing"]["pose_estimator"]) {
+            options_.pose_estimator_type_ = yaml["loop_closing"]["pose_estimator"].as<std::string>();
+        }
+
+        // 读取图优化参数
+        YAML_IO yio(yaml_path);
+        options_.with_height_ = yio.GetValueOr<bool>("loop_closing", "with_height", true);
+        options_.ndt_score_th_ = yio.GetValueOr<double>("loop_closing", "ndt_score_th", 1.0);
+        options_.height_noise_ = yio.GetValueOr<double>("loop_closing", "height_noise", 0.1);
+    }
+
+    // 创建策略
+    detector_ = CreateLoopDetector(options_.detector_type_, yaml_path);
+    if (!detector_) {
+        LOG(ERROR) << "failed to create loop detector: " << options_.detector_type_;
+        return false;
+    }
+
+    pose_estimator_ = CreateLoopPoseEstimator(options_.pose_estimator_type_, yaml_path);
+    if (!pose_estimator_) {
+        LOG(ERROR) << "failed to create loop pose estimator: " << options_.pose_estimator_type_;
+        return false;
     }
 
     if (options_.online_mode_) {
@@ -59,6 +78,8 @@ void LoopClosing::Init(const std::string yaml_path) {
         kf_thread_.SetName("handle loop closure");
         kf_thread_.Start();
     }
+
+    return true;
 }
 
 void LoopClosing::AddKF(Keyframe::Ptr kf) {
@@ -74,180 +95,44 @@ void LoopClosing::HandleKF(Keyframe::Ptr kf) {
         return;
     }
 
+    if (!detector_ || !pose_estimator_) {
+        return;
+    }
+
     cur_kf_ = kf;
     all_keyframes_.emplace_back(kf);
 
-    // 检测回环候选
-    DetectLoopCandidates();
+    // 1. 策略化的候选检测
+    detector_->AddKeyframe(kf);
+    candidates_ = detector_->Detect(kf);
 
     if (options_.verbose_) {
         LOG(INFO) << "lc: get kf " << cur_kf_->GetID() << " candi: " << candidates_.size();
     }
 
-    // 计算回环位姿
-    ComputeLoopCandidates();
-
-    // 位姿图优化
-    PoseOptimization();
-
-    last_kf_ = kf;
-}
-
-void LoopClosing::DetectLoopCandidates() {
-    candidates_.clear();
-
-    auto& kfs_mapping = all_keyframes_;
-    Keyframe::Ptr check_first = nullptr;
-
-    if (last_loop_kf_ == nullptr) {
-        last_loop_kf_ = cur_kf_;
-        return;
+    // 2. 策略化的位姿估计
+    for (auto& c : candidates_) {
+        pose_estimator_->Estimate(c, all_keyframes_);
     }
 
-    if (last_loop_kf_ && (cur_kf_->GetID() - last_loop_kf_->GetID()) <= options_.loop_kf_gap_) {
-        LOG(INFO) << "skip because last loop kf: " << last_loop_kf_->GetID();
-        return;
-    }
-
-    for (auto kf : kfs_mapping) {
-        if (check_first != nullptr && abs(int(kf->GetID() - check_first->GetID())) <= options_.min_id_interval_) {
-            // 同条轨迹内，跳过一定的ID区间
-            continue;
-        }
-
-        if (abs(int(kf->GetID() - cur_kf_->GetID())) < options_.closest_id_th_) {
-            /// 在同一条轨迹中，如果间隔太近，就不考虑回环
-            break;
-        }
-
-        Vec3d dt = kf->GetOptPose().translation() - cur_kf_->GetOptPose().translation();
-        double t2d = dt.head<2>().norm();  // x-y distance
-        double range_th = options_.max_range_;
-
-        if (t2d < range_th) {
-            LoopCandidate c(kf->GetID(), cur_kf_->GetID());
-            c.Tij_ = kf->GetLIOPose().inverse() * cur_kf_->GetLIOPose();
-
-            candidates_.emplace_back(c);
-            check_first = kf;
-        }
-    }
-
-    if (!candidates_.empty()) {
-        last_loop_kf_ = cur_kf_;
-    }
-
-    if (options_.verbose_ && !candidates_.empty()) {
-        LOG(INFO) << "lc candi: " << candidates_.size();
-    }
-}
-
-void LoopClosing::ComputeLoopCandidates() {
-    if (candidates_.empty()) {
-        return;
-    }
-
-    // 执行计算
-    std::for_each(candidates_.begin(), candidates_.end(), [this](LoopCandidate& c) { ComputeForCandidate(c); });
-    // 保存成功的候选
+    // 过滤成功的候选（使用 ndt_score_th 门控）
     std::vector<LoopCandidate> succ_candidates;
-    for (const auto& lc : candidates_) {
-        // LOG(INFO) << "candi " << lc.idx1_ << ", " << lc.idx2_ << " s: " << lc.ndt_score_;
-        if (lc.ndt_score_ > options_.ndt_score_th_) {
-            succ_candidates.emplace_back(lc);
+    for (auto& c : candidates_) {
+        if (c.ndt_score_ > options_.ndt_score_th_) {
+            succ_candidates.emplace_back(c);
         }
     }
 
-    if (options_.verbose_) {
+    if (options_.verbose_ && !succ_candidates.empty()) {
         LOG(INFO) << "success: " << succ_candidates.size() << "/" << candidates_.size();
     }
 
     candidates_.swap(succ_candidates);
-}
 
-void LoopClosing::ComputeForCandidate(lightning::LoopCandidate& c) {
-    // LOG(INFO) << "aligning " << c.idx1_ << " with " << c.idx2_;
-    const int submap_idx_range = 40;
-    auto kf1 = all_keyframes_.at(c.idx1_), kf2 = all_keyframes_.at(c.idx2_);
+    // 3. 图优化
+    PoseOptimization();
 
-    auto build_submap = [this](int given_id, bool build_in_world) -> CloudPtr {
-        CloudPtr submap(new PointCloudType);
-        for (int idx = -submap_idx_range; idx < submap_idx_range; idx += 4) {
-            int id = idx + given_id;
-            if (id < 0 || id >= all_keyframes_.size()) {
-                continue;
-            }
-
-            auto kf = all_keyframes_[id];
-            CloudPtr cloud = kf->GetCloud();
-
-            // RemoveGround(cloud, 0.1);
-
-            if (cloud->empty()) {
-                continue;
-            }
-
-            // 转到世界系下
-            SE3 Twb = kf->GetOptPose();
-
-            if (!build_in_world) {
-                Twb = all_keyframes_.at(given_id)->GetOptPose().inverse() * Twb;
-            }
-
-            CloudPtr cloud_trans(new PointCloudType);
-            pcl::transformPointCloud(*cloud, *cloud_trans, Twb.matrix());
-
-            *submap += *cloud_trans;
-        }
-        return submap;
-    };
-
-    auto submap_kf1 = build_submap(kf1->GetID(), true);
-
-    CloudPtr submap_kf2 = kf2->GetCloud();
-
-    if (submap_kf1->empty() || submap_kf2->empty()) {
-        c.ndt_score_ = 0;
-        return;
-    }
-
-    Mat4f Tw2 = kf2->GetOptPose().matrix().cast<float>();
-
-    /// 不同分辨率下的匹配
-    CloudPtr output(new PointCloudType);
-    std::vector<double> res{10.0, 5.0, 2.0, 1.0};
-
-    CloudPtr rough_map1, rough_map2;
-
-    for (auto& r : res) {
-        pcl::NormalDistributionsTransform<PointType, PointType> ndt;
-        ndt.setTransformationEpsilon(0.05);
-        ndt.setStepSize(0.7);
-        ndt.setMaximumIterations(40);
-
-        ndt.setResolution(r);
-        rough_map1 = VoxelGrid(submap_kf1, r * 0.1);
-        rough_map2 = VoxelGrid(submap_kf2, r * 0.1);
-        ndt.setInputTarget(rough_map1);
-        ndt.setInputSource(rough_map2);
-
-        ndt.align(*output, Tw2);
-        Tw2 = ndt.getFinalTransformation();
-
-        c.ndt_score_ = ndt.getTransformationProbability();
-    }
-
-    Mat4d T = Tw2.cast<double>();
-    Quatd q(T.block<3, 3>(0, 0));
-    q.normalize();
-    Vec3d t = T.block<3, 1>(0, 3);
-
-    c.Tij_ = kf1->GetOptPose().inverse() * SE3(q, t);
-
-    // pcl::io::savePCDFileBinaryCompressed(
-    //     "./data/lc_" + std::to_string(c.idx1_) + "_" + std::to_string(c.idx2_) + "_out.pcd", *output);
-    // pcl::io::savePCDFileBinaryCompressed(
-    //     "./data/lc_" + std::to_string(c.idx1_) + "_" + std::to_string(c.idx2_) + "_tgt.pcd", *rough_map1);
+    last_kf_ = kf;
 }
 
 void LoopClosing::PoseOptimization() {
@@ -342,9 +227,21 @@ void LoopClosing::PoseOptimization() {
     }
 
     LOG(INFO) << "optimize finished, loops: " << edge_loops_.size();
+}
 
-    // LOG(INFO) << "lc: cur kf " << cur_kf_->GetID() << ", opt: " << cur_kf_->GetOptPose().translation().transpose()
-    //           << ", lio: " << cur_kf_->GetLIOPose().translation().transpose();
+std::vector<std::pair<SE3, SE3>> LoopClosing::GetLoopEdges() const {
+    std::vector<std::pair<SE3, SE3>> edges;
+    for (const auto& e : edge_loops_) {
+        if (e->Level() != 0) continue;  // 跳过被标记为 outlier 的边
+        int id0 = e->GetVertex(0)->GetId();
+        int id1 = e->GetVertex(1)->GetId();
+        if (id0 >= 0 && id0 < static_cast<int>(all_keyframes_.size()) &&
+            id1 >= 0 && id1 < static_cast<int>(all_keyframes_.size())) {
+            edges.emplace_back(all_keyframes_[id0]->GetOptPose(),
+                               all_keyframes_[id1]->GetOptPose());
+        }
+    }
+    return edges;
 }
 
 }  // namespace lightning

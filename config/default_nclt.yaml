@@ -66,12 +66,15 @@ system:
   pub_tf: true
 
 loop_closing:
+  detector: spatial           # 回环检测策略: spatial
+  pose_estimator: ndt         # 位姿估计策略: ndt
   loop_kf_gap: 50
   min_id_interval: 20
   closest_id_th: 50
   max_range: 30.0
   ndt_score_th: 1.0
   with_height: true
+  height_noise: 0.1         # 高度约束噪声（越大约束越弱，避免轨迹塌陷到 z=0）
 
 
 lidar_loc:

@@ -50,6 +50,9 @@ class PangolinWindow {
 
     void UpdateKF(std::shared_ptr<Keyframe> kf);
 
+    /// 更新回环边（用于可视化）
+    void UpdateLoopEdges(const std::vector<std::pair<SE3, SE3>>& edges);
+
     /// 等待显示线程结束，并释放资源
     void Quit();
 

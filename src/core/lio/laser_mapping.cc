@@ -371,7 +371,7 @@ void LaserMapping::MakeKF() {
     Keyframe::Ptr kf = std::make_shared<Keyframe>(kf_id_++, scan_undistort_, state_point_);
 
     if (last_kf_) {
-        /// opt pose 用之前的递推
+        /// opt pose 用之前的递推：保持在优化后的坐标系中
         SE3 delta = last_kf_->GetLIOPose().inverse() * kf->GetLIOPose();
         kf->SetOptPose(last_kf_->GetOptPose() * delta);
     } else {

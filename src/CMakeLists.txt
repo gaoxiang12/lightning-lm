@@ -14,6 +14,12 @@ add_library(${PROJECT_NAME}.libs SHARED
         core/fast_lio2/fastlio2_core.cc
         core/fast_lio2/fastlio2_mapping.cc
         core/loop_closing/loop_closing.cc
+        core/loop_closing/spatial_loop_detector.cc
+        core/loop_closing/ndt_pose_estimator.cc
+        core/loop_closing/loop_closing_factory.cc
+        core/loop_closing/bev_generator.cc
+        core/loop_closing/bevplace2_loop_detector.cc
+        core/loop_closing/bevplace2_pose_estimator.cc
 
         # ikd-Tree (from FAST_LIO)
         ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty/ikd-Tree/ikd_Tree.cpp

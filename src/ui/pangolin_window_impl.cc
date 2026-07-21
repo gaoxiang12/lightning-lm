@@ -253,6 +253,22 @@ void PangolinWindowImpl::DrawAll() {
 
             glEnd();
         }
+
+        // 回环边（蓝色线段）
+        if (!loop_edges_.empty()) {
+            glLineWidth(3.0);
+            glBegin(GL_LINES);
+            glColor3f(0.0, 0.5, 1.0);  // 蓝色
+
+            for (const auto& [pose1, pose2] : loop_edges_) {
+                auto p1 = pose1.translation();
+                auto p2 = pose2.translation();
+                glVertex3f(p1[0], p1[1], p1[2]);
+                glVertex3f(p2[0], p2[1], p2[2]);
+            }
+
+            glEnd();
+        }
     }
 
     // 文字
