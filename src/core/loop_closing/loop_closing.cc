@@ -160,10 +160,10 @@ void LoopClosing::PoseOptimization() {
     }
 
     if (options_.with_height_) {
-        /// 高度约束
+        /// 高度约束：锚定到 LIO 的 z 坐标
         auto e = std::make_shared<miao::EdgeHeightPrior>();
         e->SetVertex(0, v);
-        e->SetMeasurement(0);
+        e->SetMeasurement(cur_kf_->GetLIOPose().translation()[2]);
         e->SetInformation(Mat1d::Identity() * 1.0 / (options_.height_noise_ * options_.height_noise_));
         optimizer_->AddEdge(e);
     }

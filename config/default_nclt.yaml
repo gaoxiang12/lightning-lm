@@ -73,8 +73,8 @@ loop_closing:
   closest_id_th: 50
   max_range: 30.0
   ndt_score_th: 1.0
-  with_height: true
-  height_noise: 0.1         # 高度约束噪声（越大约束越弱，避免轨迹塌陷到 z=0）
+  with_height: true           # 高度约束（已修正为锚定到 LIO z 坐标）
+  height_noise: 0.1           # 高度约束噪声
 
 
 lidar_loc:
