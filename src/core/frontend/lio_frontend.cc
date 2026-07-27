@@ -34,6 +34,8 @@ void LIOFrontend::ProcessPointCloud2(const livox_ros_driver2::msg::CustomMsg::Sh
 void LIOFrontend::ProcessPointCloud2(CloudPtr cloud) {
     std::lock_guard<std::mutex> lock(mtx_buffer_);
     lidar_buffer_.push_back(cloud);
+    // cloud->header.stamp 已由调用方设置为纳秒时间戳（localization.cpp:153）
+    time_buffer_.push_back(cloud->header.stamp * 1e-9);
 }
 
 void LIOFrontend::ProcessIMU(const IMUPtr& msg_in) {

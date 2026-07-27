@@ -266,6 +266,13 @@ void FASTLIO2Mapping::MakeKF() {
     nav_state.bg_ = state.bg;
 
     auto kf = std::make_shared<Keyframe>(kf_id_++, scan_down_body_, nav_state);
+
+    LOG(INFO) << "LIO: create kf " << kf->GetID()
+              << ", state: " << nav_state.pos_.transpose()
+              << ", kf opt pose: " << kf->GetOptPose().translation().transpose()
+              << ", lio pose: " << kf->GetLIOPose().translation().transpose()
+              << ", time: " << std::setprecision(14) << lidar_end_time_;
+
     last_kf_ = kf;
     all_keyframes_.push_back(kf);
 }

@@ -53,6 +53,7 @@ class LidarLoc {
         float max_init_distance_ = 5.0F;  // 初始化结果距候选功能点的最大 XY 距离，单位 m
         bool init_with_fp_ = true;                     // 是否使用功能点进行初始化
         bool enable_parking_static_ = false;           // 是否在静止时输出固定位置
+        bool disable_parking_skip_ = false;             // 是否禁用静止时跳过匹配
         bool enable_icp_adjust_ = false;               // 是否使用icp调整ndt匹配结果提高定位精度
 
         /// 点云过滤
@@ -105,7 +106,7 @@ class LidarLoc {
     bool TryOtherSolution(CloudPtr input, SE3& pose);
 
     /// 使用功能点初始化
-    bool InitWithFP(CloudPtr input, const SE3& fp_pose);
+    bool InitWithFP(CloudPtr input, const SE3& fp_pose, bool search_yaw = true);
 
     /// 更新全局地图
     bool UpdateGlobalMap();
@@ -218,6 +219,7 @@ class LidarLoc {
 
     std::mutex initial_pose_mutex_;  // 初始定位锁
     bool initial_pose_set_ = false;  // 定位是否被手动设置
+    bool auto_init_attempted_ = false;
     SE3 initial_pose_;               // 手动设置的初始位姿
     std::atomic_bool loc_inited_{false};  // 定位是否初始化成功
 

@@ -46,7 +46,7 @@ void SetTrackingResultState(LocalizationResult& result, bool matcher_succeeded, 
                             int consecutive_failures) {
     result.lidar_loc_valid_ = matcher_succeeded && std::isfinite(confidence);
     result.confidence_ = result.lidar_loc_valid_ ? confidence : 0.0;
-    if (consecutive_failures < 100) {
+    if (result.lidar_loc_valid_) {
         result.status_ = LocalizationStatus::GOOD;
     } else if (consecutive_failures < 300) {
         result.status_ = LocalizationStatus::FOLLOWING_DR;
@@ -109,6 +109,7 @@ bool LidarLoc::Init(const std::string& config_path) {
 
     options_.init_with_fp_ = yaml.GetValue<bool>("lidar_loc", "init_with_fp");
     options_.enable_parking_static_ = yaml.GetValue<bool>("lidar_loc", "enable_parking_static");
+    options_.disable_parking_skip_ = yaml.GetValue<bool>("lidar_loc", "disable_parking_skip");
     options_.enable_icp_adjust_ = yaml.GetValue<bool>("lidar_loc", "enable_icp_adjust");
     options_.with_height_ = yaml.GetValue<bool>("loop_closing", "with_height");
     options_.try_self_extrap_ = yaml.GetValue<bool>("lidar_loc", "try_self_extrap");
@@ -306,14 +307,16 @@ bool LidarLoc::YawSearch(SE3& pose, double& confidence, CloudPtr input, CloudPtr
     return true;
 }
 
-bool LidarLoc::InitWithFP(CloudPtr input, const SE3& fp_pose) {
+bool LidarLoc::InitWithFP(CloudPtr input, const SE3& fp_pose, bool search_yaw) {
     assert(input != nullptr && !input->empty());
 
     // 使用功能点的位置进行定位初始化
     double fitness_score = -std::numeric_limits<double>::infinity();
     SE3 pose_esti = fp_pose;
     CloudPtr output_cloud(new PointCloudType);
-    const bool matcher_converged = YawSearch(pose_esti, fitness_score, input, output_cloud);
+    const bool matcher_converged = search_yaw
+                                       ? YawSearch(pose_esti, fitness_score, input, output_cloud)
+                                       : Localize(pose_esti, fitness_score, input, output_cloud, false);
     loc_inited_ = IsInitializationResultValid(
         matcher_converged, fp_pose, pose_esti, fitness_score,
         options_.min_init_confidence_, options_.max_init_distance_);
@@ -487,17 +490,17 @@ void LidarLoc::Align(const CloudPtr& input) {
     }
 
     /// 1. 车辆静止处理
-    if (parking_ && loc_inited_) {
+    if (parking_ && loc_inited_ && !options_.disable_parking_skip_) {
         LOG(INFO) << "车辆静止，不做匹配";
-
+    
         UpdateState(input);
         current_abs_pose_ = last_abs_pose_;
         lidar_loc_pose_queue_.emplace_back(current_time, current_abs_pose_);
-
+    
         UL lock(result_mutex_);
         localization_result_.timestamp_ = current_time;
         localization_result_.pose_ = current_abs_pose_;
-
+    
         if (options_.enable_parking_static_) {
             localization_result_.is_parking_ = true;
             localization_result_.valid_ = true;
@@ -516,16 +519,19 @@ void LidarLoc::Align(const CloudPtr& input) {
             const bool initialized = WithCandidateTargetLock([&] {
                 map_->LoadOnPose(initial_pose_);
                 UpdateGlobalMap();
-                return InitWithFP(input, initial_pose_);
+                // RViz already supplies yaw; use it as the local NDT initial guess.
+                return InitWithFP(input, initial_pose_, false);
             });
+            const SE3 attempted_pose = initial_pose_;
+            initial_pose_set_ = false;
             if (initialized) {
-                LOG(INFO) << "init with external pose: " << initial_pose_.translation().transpose();
-                initial_pose_set_ = false;
+                LOG(INFO) << "init with external pose: " << attempted_pose.translation().transpose();
                 return;
             }
+            LOG(WARNING) << "external pose initialization failed; waiting for a new /initialpose";
         }
 
-        if (options_.init_with_fp_) {
+        if (options_.init_with_fp_ && !auto_init_attempted_) {
             /// 从功能点初始化
             /// 如果之前尝试过，那么需要间隔一段时间再进行搜索
             if (!fp_init_fail_pose_vec_.empty() && current_dr_pose_set_) {
@@ -573,6 +579,9 @@ void LidarLoc::Align(const CloudPtr& input) {
                 fp_last_tried_time_ = 0;
                 fp_init_fail_pose_vec_.clear();
             }
+            auto_init_attempted_ = true;
+        } else if (!initial_pose_set_) {
+            LOG_EVERY_N(INFO, 50) << "automatic initialization failed; waiting for /initialpose";
         }
 
         /// 初始化未成功时，不往下走流程

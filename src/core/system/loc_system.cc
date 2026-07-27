@@ -92,11 +92,15 @@ bool LocSystem::Init(const std::string &yaml_path) {
     }
     loc_->SetResultCallback([this](const loc::LocalizationResult& result) {
         if (tf_broadcaster_) {
-            tf_broadcaster_->sendTransform(result.ToMapOdomMsg());
             tf_broadcaster_->sendTransform(result.ToOdomBaseMsg());
+            if (result.valid_) {
+                tf_broadcaster_->sendTransform(result.ToMapOdomMsg());
+            }
         }
         odom_pub_->publish(result.ToOdomMsg());
-        localization_pose_pub_->publish(result.ToPoseMsg());
+        if (result.valid_) {
+            localization_pose_pub_->publish(result.ToPoseMsg());
+        }
         std_msgs::msg::UInt8 status;
         status.data = static_cast<uint8_t>(result.status_);
         localization_status_pub_->publish(status);

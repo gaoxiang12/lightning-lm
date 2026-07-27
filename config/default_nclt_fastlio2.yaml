@@ -1,17 +1,17 @@
-# 针对灵猴机器人的配置
+# 针对NCLT的配置
 common:
-  dataset: "linghou"
-  lidar_topic: "/driver/lidar/point_cloud/Data"
+  dataset: "nclt"
+  lidar_topic: "points_raw"
   livox_lidar_topic: "/livox/lidar"
-  imu_topic: "/driver/imu/Data"
+  imu_topic: "imu_raw"
   debug: false                    # 调试模式：打印详细日志
 
 # ====== LIO 公共参数 (两种前端共用) ======
 lio_common:
-  lidar_type: 4                # 1=Livox, 2=Velodyne, 3=Ouster, 4=RoboSense
-  scan_line: 128               # 雷达线数
+  lidar_type: 2                # 1=Livox, 2=Velodyne, 3=Ouster, 4=RoboSense
+  scan_line: 32                # 雷达线数
   blind: 0.5                   # 盲区距离
-  point_filter_num: 4          # 点云降采样（每 N 个点保留 1 个）
+  point_filter_num: 6          # 点云降采样（每 N 个点保留 1 个）
   filter_size_scan: 0.5        # 体素降采样分辨率
   filter_size_map: 0.5         # 地图体素分辨率
   max_iteration: 4             # EKF 最大迭代次数
@@ -24,10 +24,6 @@ lio_common:
 
 # ====== fasterlio 专用参数 ======
 fasterlio:
-  # 以下参数从 lio_common 继承: lidar_type, scan_line, blind, point_filter_num,
-  #   filter_size_scan, filter_size_map, max_iteration, acc_cov, gyr_cov,
-  #   b_acc_cov, b_gyr_cov, extrinsic_T, extrinsic_R
-
   time_scale: 1e-3             # 时间缩放，仅对 Velodyne(lidar_type=2) 生效
   skip_lidar_num: 0            # 点云跳帧
   ivox_grid_resolution: 0.5    # iVox 网格分辨率
@@ -38,7 +34,7 @@ fasterlio:
   keep_first_imu_estimation: false
   kf_dis_th: 2.0               # 关键帧距离阈值
   kf_angle_th: 5.0             # 关键帧角度阈值 (度)
-  enable_icp_part: true        # 点到点 ICP
+  enable_icp_part: false       # 点到点 ICP（NCLT 数据集关闭）
   plane_icp_weight: 500.0      # 点到面 ICP 权重
   min_pts: 300                 # 最小特征点数
   imu_filter: true             # IMU 低通滤波
@@ -48,17 +44,17 @@ fasterlio:
 g2p5:
   esti_floor: false
   lidar_height: 0.0
-  floor_height: -0.01
-  min_th_floor: 0.02
+  floor_height: -1.2
+  min_th_floor: 0.50
   max_th_floor: 1.0
-  grid_map_resolution: 0.02
+  grid_map_resolution: 0.2
 
 system:
-  mapping_frontend: "aa_fasterlio"  # 建图前端: aa_fasterlio 或 fast_lio2
+  mapping_frontend: "fast_lio2"
   with_loop_closing: true
-  with_ui: true
-  with_2dui: true
-  with_g2p5: true
+  with_ui: false
+  with_2dui: false
+  with_g2p5: false
   step_on_kf: false
 
   enable_lidar_loc_skip: false
@@ -70,20 +66,20 @@ system:
   pub_tf: true
 
 loop_closing:
+  detector: spatial           # 回环检测策略: spatial
+  pose_estimator: ndt         # 位姿估计策略: ndt
   loop_kf_gap: 50
   min_id_interval: 20
   closest_id_th: 50
   max_range: 30.0
-  ndt_score_th: 1.0
-  with_height: true
+  ndt_score_th: 1.3
+  with_height: false
+  height_noise: 0.1           # 高度约束噪声
 
 
 lidar_loc:
   enable_dynamic_polygon: false
   enable_parking_static: true
-  parking_speed_threshold: 0.05  # m/s
-  parking_gyro_threshold: 0.05   # rad/s
-  parking_min_samples: 5
   enable_icp_adjust: false
   filter_intensity_max: 100.0
   filter_intensity_min: 10.0
@@ -95,8 +91,7 @@ lidar_loc:
   lidar_loc_odom_th: 0.5
   init_with_fp: true
   min_init_confidence: 1.8
-  max_init_distance: 5.0
-  update_dynamic_polygon: true
+  update_dynamic_cloud: true
   update_err_h: 0.2
   update_err_v: 0.2
   update_kf_dis: 2.0
@@ -106,7 +101,7 @@ lidar_loc:
 
 maps:
   delete_when_unload: false
-  dyn_cloud_policy: long
+  dyn_cloud_policy: persistent
   load_dyn_cloud: true
   load_map_size: 2
   max_pts_dyn_chunk: 100000

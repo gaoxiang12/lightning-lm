@@ -4,6 +4,7 @@
 #include "core/localization/lidar_loc/lidar_loc.h"
 #include "core/localization/localization.h"
 
+#include <algorithm>
 #include <opencv2/highgui.hpp>
 
 #include "core/localization/pose_graph/pgo.h"
@@ -11,6 +12,27 @@
 #include "ui/pangolin_window.h"
 
 namespace lightning::loc {
+
+bool UpdateParkingState(NavState& state, const Vec3d& angular_velocity,
+                        double speed_threshold, double gyro_threshold,
+                        int min_samples, int& quiet_samples) {
+    const bool quiet = speed_threshold > 0.0 && gyro_threshold > 0.0 && min_samples > 0 &&
+                       state.GetVel().allFinite() && angular_velocity.allFinite() &&
+                       state.GetVel().norm() < speed_threshold &&
+                       angular_velocity.norm() < gyro_threshold;
+    if (!quiet) {
+        quiet_samples = 0;
+        state.is_parking_ = false;
+        return false;
+    }
+
+    quiet_samples = std::min(quiet_samples + 1, min_samples);
+    state.is_parking_ = quiet_samples >= min_samples;
+    if (state.is_parking_) {
+        state.SetVel(Vec3d::Zero());
+    }
+    return state.is_parking_;
+}
 
 // ！ 构造函数
 Localization::Localization(Options options) { options_ = options; }
@@ -67,6 +89,14 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
     options_.enable_lidar_odom_skip_ = yaml.GetValue<bool>("system", "enable_lidar_odom_skip");
     options_.lidar_odom_skip_num_ = yaml.GetValue<int>("system", "lidar_odom_skip_num");
     options_.loc_on_kf_ = yaml.GetValue<bool>("lidar_loc", "loc_on_kf");
+    options_.enable_parking_static_ =
+        yaml.GetValueOr<bool>("lidar_loc", "enable_parking_static", false);
+    options_.parking_speed_threshold_ =
+        yaml.GetValueOr<double>("lidar_loc", "parking_speed_threshold", 0.05);
+    options_.parking_gyro_threshold_ =
+        yaml.GetValueOr<double>("lidar_loc", "parking_gyro_threshold", 0.05);
+    options_.parking_min_samples_ =
+        yaml.GetValueOr<int>("lidar_loc", "parking_min_samples", 5);
 
     lidar_odom_proc_cloud_.SetMaxSize(1);
     lidar_loc_proc_cloud_.SetMaxSize(1);
@@ -95,11 +125,11 @@ bool Localization::Init(const std::string& yaml_path, const std::string& global_
 
         loc_result_ = res;
 
-        if (result_callback_ && loc_result_.valid_ && loc_result_.rel_pose_set_) {
+        if (result_callback_ && loc_result_.rel_pose_set_) {
             result_callback_(loc_result_);
         }
 
-        if (ui_) {
+        if (ui_ && loc_result_.valid_) {
             ui_->UpdateNavState(loc_result_.ToNavState());
             ui_->UpdateRecentPose(loc_result_.pose_);
         }
@@ -291,14 +321,10 @@ void Localization::ProcessIMUMsg(IMUPtr imu) {
         return;
     }
 
-    // /// 停车判定
-    // constexpr auto kThVbrbStill = 0.05;  // 0.08;
-    // constexpr auto kThOmegaStill = 0.05;
-
-    // if (dr_state.GetVel().norm() < kThVbrbStill && imu->angular_velocity.norm() < kThOmegaStill) {
-    //     dr_state.is_parking_ = true;
-    //     dr_state.SetVel(Vec3d::Zero());
-    // }
+    UpdateParkingState(dr_state, imu->angular_velocity,
+                       options_.enable_parking_static_ ? options_.parking_speed_threshold_ : 0.0,
+                       options_.parking_gyro_threshold_,
+                       options_.parking_min_samples_, parking_quiet_samples_);
 
     /// 如果没有odm, 用lio替代DR
 

@@ -13,6 +13,7 @@
 
 #include "core/frontend/pointcloud_preprocess.h"
 #include "core/localization/lidar_loc/lidar_loc.h"
+#include "core/localization/localization.h"
 #include "core/localization/localization_result.h"
 #include "core/localization/pose_graph/pgo.h"
 #include "io/yaml_io.h"
@@ -103,7 +104,15 @@ TEST(LidarLocTracking, FailedMatcherIsNotAValidFiniteMeasurement) {
     EXPECT_FALSE(result.lidar_loc_valid_);
     EXPECT_TRUE(std::isfinite(result.confidence_));
     EXPECT_DOUBLE_EQ(result.confidence_, 0.0);
+    EXPECT_EQ(result.status_, lightning::loc::LocalizationStatus::FOLLOWING_DR);
+
+    lightning::loc::SetTrackingResultState(result, true, 2.5, 0);
+    EXPECT_TRUE(result.lidar_loc_valid_);
     EXPECT_EQ(result.status_, lightning::loc::LocalizationStatus::GOOD);
+
+    lightning::loc::SetTrackingResultState(result, false, 0.0, 300);
+    EXPECT_FALSE(result.lidar_loc_valid_);
+    EXPECT_EQ(result.status_, lightning::loc::LocalizationStatus::FAIL);
 }
 
 TEST(YamlIo, UsesDefaultOnlyWhenValueIsMissing) {
@@ -118,6 +127,37 @@ TEST(YamlIo, UsesDefaultOnlyWhenValueIsMissing) {
     EXPECT_FLOAT_EQ(yaml.GetValueOr<float>("lidar_loc", "configured_distance", 5.0F), 3.5F);
 
     std::remove(path.c_str());
+}
+
+TEST(StationaryDetection, EntersParkingAfterRequiredQuietSamples) {
+    lightning::NavState state;
+    state.vel_ = lightning::Vec3d(0.02, 0.0, 0.0);
+    int quiet_samples = 0;
+
+    for (int i = 0; i < 4; ++i) {
+        EXPECT_FALSE(lightning::loc::UpdateParkingState(
+            state, lightning::Vec3d(0.0, 0.0, 0.01), 0.05, 0.05, 5, quiet_samples));
+    }
+    EXPECT_TRUE(lightning::loc::UpdateParkingState(
+        state, lightning::Vec3d(0.0, 0.0, 0.01), 0.05, 0.05, 5, quiet_samples));
+    EXPECT_TRUE(state.is_parking_);
+    EXPECT_TRUE(state.vel_.isZero());
+}
+
+TEST(StationaryDetection, ExitsParkingImmediatelyOnMotion) {
+    lightning::NavState state;
+    state.vel_ = lightning::Vec3d(0.01, 0.0, 0.0);
+    int quiet_samples = 0;
+    EXPECT_FALSE(lightning::loc::UpdateParkingState(
+        state, lightning::Vec3d::Zero(), 0.05, 0.05, 2, quiet_samples));
+    EXPECT_TRUE(lightning::loc::UpdateParkingState(
+        state, lightning::Vec3d::Zero(), 0.05, 0.05, 2, quiet_samples));
+
+    state.vel_ = lightning::Vec3d(0.1, 0.0, 0.0);
+    EXPECT_FALSE(lightning::loc::UpdateParkingState(
+        state, lightning::Vec3d::Zero(), 0.05, 0.05, 2, quiet_samples));
+    EXPECT_FALSE(state.is_parking_);
+    EXPECT_EQ(quiet_samples, 0);
 }
 
 }  // namespace
@@ -220,6 +260,29 @@ TEST(PGO, PreservesLocalizationStatus) {
     failed.status_ = lightning::loc::LocalizationStatus::FAIL;
     EXPECT_FALSE(pgo.ProcessLidarLoc(failed));
     EXPECT_EQ(output.status_, lightning::loc::LocalizationStatus::FAIL);
+}
+
+TEST(PGO, PublishesRelativeOdomBeforeGlobalLocalization) {
+    lightning::loc::PGO pgo;
+    lightning::loc::LocalizationResult output;
+    int publish_count = 0;
+    pgo.SetHighFrequencyGlobalOutputHandleFunction(
+        [&](const lightning::loc::LocalizationResult& result) {
+            output = result;
+            ++publish_count;
+        });
+
+    lightning::NavState odom;
+    odom.timestamp_ = 1.0;
+    odom.SetPose(lightning::SE3(lightning::SO3(), lightning::Vec3d(0.2, -0.1, 0.0)));
+    odom.vel_ = lightning::Vec3d(0.1, 0.0, 0.0);
+    ASSERT_TRUE(pgo.ProcessLidarOdom(odom));
+
+    ASSERT_EQ(publish_count, 1);
+    EXPECT_FALSE(output.valid_);
+    EXPECT_TRUE(output.rel_pose_set_);
+    EXPECT_EQ(output.status_, lightning::loc::LocalizationStatus::INITIALIZING);
+    EXPECT_NEAR(output.rel_pose_.translation().x(), 0.2, 1e-9);
 }
 
 TEST(PGO, RejectsNonFiniteLocalizationConfidence) {
@@ -328,6 +391,29 @@ TEST(PGO, ResetDropsPreviousLocalization) {
     state.SetPose(lightning::SE3(lightning::SO3(), lightning::Vec3d(4.0, 0.0, 0.0)));
     ASSERT_TRUE(pgo.ProcessDR(state));
     EXPECT_EQ(publish_count, count_after_reset);
+}
+
+TEST(PGO, AcceptsFirstLocalizationAfterResetBeforeOdomRefills) {
+    lightning::loc::PGO pgo;
+    ASSERT_TRUE(pgo.Reset());
+
+    lightning::NavState dr;
+    dr.timestamp_ = 0.9;
+    dr.SetPose(lightning::SE3(lightning::SO3(), lightning::Vec3d::Zero()));
+    ASSERT_TRUE(pgo.ProcessDR(dr));
+    dr.timestamp_ = 1.0;
+    dr.SetPose(lightning::SE3(lightning::SO3(), lightning::Vec3d::Zero()));
+    ASSERT_TRUE(pgo.ProcessDR(dr));
+
+    lightning::loc::LocalizationResult loc;
+    loc.timestamp_ = 1.0;
+    loc.pose_ = lightning::SE3(lightning::SO3(), lightning::Vec3d(1.0, 2.0, 0.0));
+    loc.valid_ = true;
+    loc.lidar_loc_valid_ = true;
+    loc.status_ = lightning::loc::LocalizationStatus::GOOD;
+
+    EXPECT_TRUE(pgo.ProcessLidarLoc(loc));
+    EXPECT_NE(pgo.GetCurrentPGOFrame(), nullptr);
 }
 
 }  // namespace

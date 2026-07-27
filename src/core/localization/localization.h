@@ -21,6 +21,10 @@ namespace loc {
 class LidarLoc;
 class PGO;
 
+bool UpdateParkingState(NavState& state, const Vec3d& angular_velocity,
+                        double speed_threshold, double gyro_threshold,
+                        int min_samples, int& quiet_samples);
+
 /**
  * 实时定位接口实现
  */
@@ -41,6 +45,10 @@ class Localization {
         bool enable_lidar_loc_rviz_ = false;   // 是否允许调试用rviz
         int lidar_loc_skip_num_ = 4;           // 如果允许跳帧，跳多少帧
         bool loc_on_kf_ = false;
+        bool enable_parking_static_ = false;
+        double parking_speed_threshold_ = 0.05;
+        double parking_gyro_threshold_ = 0.05;
+        int parking_min_samples_ = 5;
     };
 
     Localization(Options options = Options());
@@ -130,6 +138,7 @@ class Localization {
     double last_imu_time_ = 0;
     double last_odom_time_ = 0;
     double last_cloud_time_ = 0;
+    int parking_quiet_samples_ = 0;
 };
 }  // namespace loc
 

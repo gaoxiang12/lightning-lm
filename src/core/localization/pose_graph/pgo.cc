@@ -211,6 +211,17 @@ bool PGO::ProcessLidarOdom(const NavState& lio_result) {
         }
     }
 
+    if (!impl_->result_.valid_ && high_freq_output_func_) {
+        LocalizationResult odom_only;
+        odom_only.timestamp_ = lio_result.timestamp_;
+        odom_only.status_ = LocalizationStatus::INITIALIZING;
+        odom_only.rel_pose_ = lio_result.GetPose();
+        odom_only.rel_pose_set_ = true;
+        odom_only.vel_b_ = lio_result.GetRot().inverse() * lio_result.GetVel();
+        high_freq_output_func_(odom_only);
+        return true;
+    }
+
     /// 如果LO的时间比DR更新，则发布LO的递推结果
     if (!impl_->dr_pose_queue_.empty() && lio_result.timestamp_ >= impl_->dr_pose_queue_.back().timestamp_ &&
         !is_parking_) {

@@ -4,14 +4,14 @@
 
 **Goal:** 将 Nav2 局部代价地图精简为仅使用融合 LiDAR，并在不输出底盘速度时完成实时导航回归。
 
-**Architecture:** Lightning 继续用融合 LiDAR 和 IMU 定位；Nav2 voxel layer 只订阅融合 LiDAR。关闭硬件适配器，因此不启动超声波适配器和速度桥。
+**Architecture:** `lidar_relay` 是上位机唯一跨机 LiDAR 读取者，并在本机将点云分发给 Lightning 和 Nav2；Nav2 voxel layer 只订阅该融合 LiDAR。关闭硬件适配器，因此不启动超声波适配器和速度桥。
 
 **Tech Stack:** ROS 2 Humble、Navigation2、pytest、YAML。
 
 ## Global Constraints
 
 - 只构建 `lightning_nav2`，不构建整个 workspace。
-- 不增加点云 relay、新依赖或新节点。
+- 不增加外部依赖；实测确认多个跨机读取者导致断流后，增加一个最小 relay 节点。
 - 不启动速度桥，不向 `/move/ManualMoveCmd` 新增发布者。
 - `src/lightning_nav2` 不是 Git 仓库，以测试输出为检查点。
 
@@ -27,7 +27,7 @@
 - Consumes: `/driver/lidar/point_cloud/Data` (`sensor_msgs/msg/PointCloud2`).
 - Produces: local costmap with `voxel_layer` and `inflation_layer` only.
 
-- [ ] **Step 1: Add the failing configuration test**
+- [x] **Step 1: Add the failing configuration test**
 
 ```python
 def test_minimal_navigation_uses_only_fused_lidar_for_obstacles():
@@ -44,17 +44,17 @@ def test_minimal_navigation_uses_only_fused_lidar_for_obstacles():
     assert "range_layer" not in params
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run `source /opt/ros/humble/setup.bash && python3 -m pytest -q src/lightning_nav2/test/test_lightning_config.py`.
 
 Expected: the new test fails because `camera` and `range_layer` are present.
 
-- [ ] **Step 3: Apply the minimum YAML change**
+- [x] **Step 3: Apply the minimum YAML change**
 
 Set `plugins: [voxel_layer, inflation_layer]` and `observation_sources: fused_lidar`. Delete the `camera` source and complete `range_layer` block; keep the fused LiDAR limits unchanged.
 
-- [ ] **Step 4: Verify GREEN and build only the affected package**
+- [x] **Step 4: Verify GREEN and build only the affected package**
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -74,11 +74,12 @@ Expected: all `lightning_nav2` tests pass.
 - Consumes: live LiDAR/IMU and `/clock`.
 - Produces: diagnostic evidence only; no chassis command output.
 
-- [ ] **Step 1: Start the minimal stack**
+- [x] **Step 1: Start the minimal stack**
 
 ```bash
 source /opt/ros/humble/setup.bash
 source /home/tjzn/Workspace/install/setup.bash
+export CYCLONEDDS_URI='<CycloneDDS><Domain><General><Interfaces><NetworkInterface name="eth0"/></Interfaces></General></Domain></CycloneDDS>'
 ros2 launch lightning_nav2 navigation.launch.py \
   map:=/home/tjzn/Workspace/data/new_map/map.yaml \
   sensor_extrinsics:=/home/tjzn/Workspace/sensors_extrinsic.yaml \
@@ -87,10 +88,17 @@ ros2 launch lightning_nav2 navigation.launch.py \
   use_lower_clock:=true
 ```
 
-- [ ] **Step 2: Verify live signals**
+- [x] **Step 2: Verify live signals**
 
 Check LiDAR near 10 Hz, localization status `2`, finite `map -> base_link`, all five lifecycle nodes `active`, `/local_costmap/costmap` updating, and no upper `cmd_vel_bridge` publisher on `/move/ManualMoveCmd`.
 
-- [ ] **Step 3: Stop and inspect output**
+- [x] **Step 3: Stop and inspect output**
 
 Expected: no sustained observation-buffer timeout, no sustained `earlier than all the data in the transform cache`, no `RemovePassedGoals` error, and no Python traceback.
+
+### Task 3: Single remote reader and voxel bounds
+
+- [x] Add `lidar_relay` and remap Lightning plus Nav2 to `/lightning_nav2/fused_lidar`.
+- [x] Bind launch child processes to CycloneDDS interface `eth0`.
+- [x] Set voxel bounds to `origin_z: -0.1`, `max_obstacle_height: 1.5`.
+- [x] Verify relay ~11 Hz, localization `GOOD(2)`, finite stable TF, and all Nav2 lifecycle nodes active.
