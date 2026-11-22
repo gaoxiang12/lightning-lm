@@ -61,10 +61,12 @@ bool G2P5Map::Resize(const float &temp_min_x, const float &temp_min_y, const flo
         new_grids[xi] = new SubGrid[temp_grid_size_y];
     }
 
-    int min_grid_x = (int)round((temp_min_x - min_x_) / grid_reso_);
-    int min_grid_y = (int)round((temp_min_y - min_y_) / grid_reso_);
-    int max_grid_x = (int)ceil((temp_max_x - min_x_) / grid_reso_);
-    int max_grid_y = (int)ceil((temp_max_y - min_y_) / grid_reso_);
+    // 地图左上角点所在的子grid id
+    int min_grid_x = (int)floor((temp_min_x - min_x_) / grid_reso_);
+    int min_grid_y = (int)floor((temp_min_y - min_y_) / grid_reso_);
+    // 地图右下角点所在的子grid id + 1，为了左闭右开循环
+    int max_grid_x = (int)floor((temp_max_x - min_x_) / grid_reso_) + 1;
+    int max_grid_y = (int)floor((temp_max_y - min_y_) / grid_reso_) + 1;
 
     int dx = min_grid_x < 0 ? 0 : min_grid_x;
     int dy = min_grid_y < 0 ? 0 : min_grid_y;
@@ -86,10 +88,10 @@ bool G2P5Map::Resize(const float &temp_min_x, const float &temp_min_y, const flo
 
     delete[] this->grids_;
     this->grids_ = new_grids;
-    this->min_x_ = temp_min_x;
-    this->min_y_ = temp_min_y;
-    this->max_x_ = temp_max_x;
-    this->max_y_ = temp_max_y;
+    this->min_x_ = static_cast<int>(std::floor(temp_min_x / grid_reso_)) * grid_reso_; // 左上角只能是子grid左上角的坐标
+    this->min_y_ = static_cast<int>(std::floor(temp_min_y / grid_reso_)) * grid_reso_;
+    this->max_x_ = this->min_x_ + temp_grid_size_x * grid_reso_;
+    this->max_y_ = this->min_y_ + temp_grid_size_y * grid_reso_;
     this->grid_size_x_ = temp_grid_size_x;
     this->grid_size_y_ = temp_grid_size_y;
 
