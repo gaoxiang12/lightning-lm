@@ -55,7 +55,7 @@ class IVoxNodePhc {
 
     PointT GetPoint(const std::size_t idx) const;
 
-    bool NNPoint(const PointT& cur_pt, DistPoint& dist_point) const;
+    bool NNPoint(const PointT& cur_pt, DistPoint& dist_point);
 
     int KNNPointByCondition(std::vector<DistPoint>& dis_points, const PointT& cur_pt, const int& K = 5,
                             const double& max_range = 5.0);
@@ -272,7 +272,7 @@ PointT IVoxNodePhc<PointT, dim>::GetPoint(const std::size_t idx) const {
 }
 
 template <typename PointT, int dim>
-bool IVoxNodePhc<PointT, dim>::NNPoint(const PointT& cur_pt, DistPoint& dist_point) const {
+bool IVoxNodePhc<PointT, dim>::NNPoint(const PointT& cur_pt, DistPoint& dist_point) {
     if (phc_cubes_.empty()) {
         return false;
     }
