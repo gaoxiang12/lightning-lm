@@ -55,7 +55,7 @@ class IVoxNodePhc {
 
     PointT GetPoint(const std::size_t idx) const;
 
-    bool NNPoint(const PointT& cur_pt, DistPoint& dist_point) const;
+    bool NNPoint(const PointT& cur_pt, DistPoint& dist_point);
 
     int KNNPointByCondition(std::vector<DistPoint>& dis_points, const PointT& cur_pt, const int& K = 5,
                             const double& max_range = 5.0);
@@ -272,7 +272,7 @@ PointT IVoxNodePhc<PointT, dim>::GetPoint(const std::size_t idx) const {
 }
 
 template <typename PointT, int dim>
-bool IVoxNodePhc<PointT, dim>::NNPoint(const PointT& cur_pt, DistPoint& dist_point) const {
+bool IVoxNodePhc<PointT, dim>::NNPoint(const PointT& cur_pt, DistPoint& dist_point) {
     if (phc_cubes_.empty()) {
         return false;
     }
@@ -283,14 +283,14 @@ bool IVoxNodePhc<PointT, dim>::NNPoint(const PointT& cur_pt, DistPoint& dist_poi
 
     if (it == phc_cubes_.end()) {
         it--;
-        dist_point = DistPoint(distance2(cur_pt, it->GetPoint()), this, it - phc_cubes_.begin());
+        dist_point = DistPoint(math::distance2(cur_pt, it->GetPoint()), this, it - phc_cubes_.begin());
     } else if (it == phc_cubes_.begin()) {
-        dist_point = DistPoint(distance2(cur_pt, it->GetPoint()), this, it - phc_cubes_.begin());
+        dist_point = DistPoint(math::distance2(cur_pt, it->GetPoint()), this, it - phc_cubes_.begin());
     } else {
         auto last_it = it;
         last_it--;
-        double d1 = distance2(cur_pt, it->GetPoint());
-        double d2 = distance2(cur_pt, last_it->GetPoint());
+        double d1 = math::distance2(cur_pt, it->GetPoint());
+        double d2 = math::distance2(cur_pt, last_it->GetPoint());
         if (d1 > d2) {
             dist_point = DistPoint(d2, this, it - phc_cubes_.begin());
         } else {
@@ -314,7 +314,7 @@ int IVoxNodePhc<PointT, dim>::KNNPointByCondition(std::vector<DistPoint>& dis_po
         8 * max_search_cube_side_length * max_search_cube_side_length * max_search_cube_side_length;
 
     auto create_dist_point = [&cur_pt, this](typename std::vector<PhcCube>::const_iterator forward_it) {
-        double d = distance2(forward_it->GetPoint(), cur_pt);
+        double d = math::distance2(forward_it->GetPoint(), cur_pt);
         return DistPoint(d, this, forward_it - phc_cubes_.begin());
     };
 
